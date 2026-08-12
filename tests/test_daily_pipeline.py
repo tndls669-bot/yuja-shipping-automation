@@ -25,6 +25,10 @@ def _run(inbox_dir, output_dir, **kwargs):
     kwargs.setdefault("cumulative_path", os.path.join(output_dir, "cumulative_data.json"))
     kwargs.setdefault("dashboard_path", os.path.join(output_dir, "dashboard.html"))
     kwargs.setdefault("log_path", os.path.join(output_dir, "aggregate_log.csv"))
+    kwargs.setdefault("senders_path", os.path.join(output_dir, "wholesale_senders.txt"))
+    kwargs.setdefault("processed_email_ids_path", os.path.join(output_dir, "processed_email_ids.json"))
+    kwargs.setdefault("phone_senders_path", os.path.join(output_dir, "phone_text_senders.txt"))
+    kwargs.setdefault("processed_phone_email_ids_path", os.path.join(output_dir, "processed_phone_email_ids.json"))
     daily_pipeline.run("dummy-key", inbox_dir=inbox_dir, output_dir=output_dir, **kwargs)
 
 
@@ -188,7 +192,9 @@ def test_fetched_wholesale_emails_are_parsed_and_merged():
         ],
     ])
 
-    daily_pipeline.load_sender_list = lambda path: ["seller@example.com"]
+    daily_pipeline.load_sender_list = lambda path: (
+        ["seller@example.com"] if "wholesale_senders" in path else []
+    )
     daily_pipeline.fetch_wholesale_emails = lambda *a, **k: ["[보낸사람: seller@example.com] 주문 내용..."]
 
     old_env = {k: os.environ.get(k) for k in ("GMAIL_ADDRESS", "GMAIL_APP_PASSWORD")}
@@ -204,6 +210,50 @@ def test_fetched_wholesale_emails_are_parsed_and_merged():
                 rows = list(csv.reader(f))
             assert rows[1][4] == "메일주문자"
             assert rows[1][1].startswith("wholesale-") and "mail001" in rows[1][1]
+    finally:
+        for k, v in old_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+def test_phone_text_via_self_sent_email_is_tagged_phone_text_channel():
+    text_order_parser.call_gemini_json = _stub_per_call([
+        [
+            {
+                "recipient_name": "폰주문자",
+                "phone": "01099990000",
+                "address": "주소",
+                "postal_code": "55555",
+                "product_group": "유자청",
+                "product_detail": "디오가닉",
+                "weight_or_qty": 1,
+                "delivery_message": None,
+                "scheduled_delivery": False,
+            }
+        ],
+    ])
+
+    daily_pipeline.load_sender_list = lambda path: (
+        ["tndls669@gmail.com"] if "phone_text_senders" in path else []
+    )
+    daily_pipeline.fetch_wholesale_emails = lambda *a, **k: ["오늘 문자로 받은 주문 정리..."]
+
+    old_env = {k: os.environ.get(k) for k in ("GMAIL_ADDRESS", "GMAIL_APP_PASSWORD")}
+    os.environ["GMAIL_ADDRESS"] = "tndls669@gmail.com"
+    os.environ["GMAIL_APP_PASSWORD"] = "fake-app-password"
+
+    try:
+        with tempfile.TemporaryDirectory() as inbox_dir, tempfile.TemporaryDirectory() as output_dir:
+            _run(inbox_dir, output_dir, fetch_emails=True)
+
+            orders_file = [f for f in os.listdir(output_dir) if f.endswith("_orders.csv")][0]
+            with open(os.path.join(output_dir, orders_file), encoding="utf-8-sig") as f:
+                rows = list(csv.reader(f))
+            assert rows[1][0] == "전화문자"
+            assert rows[1][4] == "폰주문자"
+            assert rows[1][1].startswith("phone-") and "mail001" in rows[1][1]
     finally:
         for k, v in old_env.items():
             if v is None:

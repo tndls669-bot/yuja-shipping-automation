@@ -1,11 +1,14 @@
 """매일 아침 실행하는 파이프라인.
 
-data/inbox/wholesale.txt   — 오늘 온 위탁판매자 이메일 본문을 붙여넣어 둔 파일 (여러 건 가능)
-data/inbox/phone_text.txt  — 오늘 전화/문자로 받은 주문을 정리해 붙여넣은 텍스트 뭉치
+두 가지 방식으로 주문을 입력받는다:
+1. 로컬 파일 — data/inbox/wholesale.txt, data/inbox/phone_text.txt (이 컴퓨터에서 직접 붙여넣기)
+2. 이메일 — data/wholesale_senders.txt / data/phone_text_senders.txt에 등록된 주소에서 온
+   새 메일을 자동으로 읽어옴 (클라우드 실행 시 이 방식만 쓰게 됨 — 전화/문자 주문은
+   대표님이 자신에게 보낸 메일로 인식)
 
-두 파일을 읽어 표준 스키마로 파싱 + 검증한 뒤,
-data/output/{날짜}_orders.csv (정상건), data/output/{날짜}_issues.csv (이상건)로 저장하고
-처리한 inbox 파일은 data/inbox/processed/ 로 옮겨 다음 날 중복 처리되지 않게 한다.
+전부 표준 스키마로 파싱 + 검증한 뒤, data/output/{날짜}_orders.csv(정상건)/
+{날짜}_issues.csv(이상건)에 저장(개인정보 포함, 로컬/이메일 전용, 깃에는 안 올라감)하고,
+개인정보 없는 집계만 data/aggregate_log.csv에 남겨(깃 커밋 대상) 누적 대시보드를 갱신한다.
 """
 import os
 import shutil
@@ -33,6 +36,8 @@ _CUMULATIVE_PATH = os.path.join(_BASE_DIR, "data", "cumulative_data.json")
 _DASHBOARD_PATH = os.path.join(_OUTPUT_DIR, "dashboard.html")
 _SENDERS_PATH = os.path.join(_BASE_DIR, "data", "wholesale_senders.txt")
 _PROCESSED_EMAIL_IDS_PATH = os.path.join(_BASE_DIR, "data", "processed_email_ids.json")
+_PHONE_SENDERS_PATH = os.path.join(_BASE_DIR, "data", "phone_text_senders.txt")
+_PROCESSED_PHONE_EMAIL_IDS_PATH = os.path.join(_BASE_DIR, "data", "processed_phone_email_ids.json")
 _AGGREGATE_LOG_PATH = os.path.join(_BASE_DIR, "data", "aggregate_log.csv")
 
 _SOURCES = [
@@ -109,7 +114,9 @@ def _send_report(today: str, summary: str) -> None:
         print(f"  이메일 발송 실패: {e}")
 
 
-def _fetch_wholesale_email_texts(senders_path: str, processed_ids_path: str) -> list[str]:
+def _fetch_email_texts(senders_path: str, processed_ids_path: str) -> list[str]:
+    """지정된 발신자 주소에서 온 새 메일 본문을 가져온다. 위탁판매자 이메일뿐 아니라
+    (전화문자 채널처럼) 대표님이 자신에게 보낸 메일을 읽어올 때도 그대로 재사용한다."""
     gmail_address = os.environ.get("GMAIL_ADDRESS")
     app_password = os.environ.get("GMAIL_APP_PASSWORD")
     if not gmail_address or not app_password:
@@ -129,6 +136,8 @@ def run(
     dashboard_path: str = _DASHBOARD_PATH,
     senders_path: str = _SENDERS_PATH,
     processed_email_ids_path: str = _PROCESSED_EMAIL_IDS_PATH,
+    phone_senders_path: str = _PHONE_SENDERS_PATH,
+    processed_phone_email_ids_path: str = _PROCESSED_PHONE_EMAIL_IDS_PATH,
     log_path: str = _AGGREGATE_LOG_PATH,
     fetch_emails: bool = True,
 ) -> None:
@@ -145,10 +154,17 @@ def run(
         _archive_inbox_file(inbox_dir, filename, today)
 
     if fetch_emails:
-        email_texts = _fetch_wholesale_email_texts(senders_path, processed_email_ids_path)
-        for i, text in enumerate(email_texts, start=1):
+        wholesale_texts = _fetch_email_texts(senders_path, processed_email_ids_path)
+        for i, text in enumerate(wholesale_texts, start=1):
             orders = parse_orders_from_text(
                 text, Channel.WHOLESALE, f"wholesale-{today_compact}-mail{i:03d}", api_key=api_key
+            )
+            all_orders.extend(orders)
+
+        phone_texts = _fetch_email_texts(phone_senders_path, processed_phone_email_ids_path)
+        for i, text in enumerate(phone_texts, start=1):
+            orders = parse_orders_from_text(
+                text, Channel.PHONE_TEXT, f"phone-{today_compact}-mail{i:03d}", api_key=api_key
             )
             all_orders.extend(orders)
 
