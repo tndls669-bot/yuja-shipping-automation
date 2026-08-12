@@ -1,0 +1,10 @@
+.env
+__pycache__/
+*.pyc
+
+# 개인정보(이름/전화번호/주소) 포함 파일 — 절대 커밋하지 않음
+data/inbox/
+data/output/*_orders.csv
+data/output/*_issues.csv
+data/output/dashboard.html
+data/output/run_log.txt
