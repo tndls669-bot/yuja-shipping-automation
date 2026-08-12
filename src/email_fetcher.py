@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from email.header import decode_header
 
 from excel_reader import extract_text_from_xlsx
+from network_compat import force_ipv4
 
 _IMAP_HOST = "imap.gmail.com"
 
@@ -95,6 +96,7 @@ def fetch_wholesale_emails(
     if not sender_list:
         return []
 
+    force_ipv4()
     processed_ids = _load_processed_ids(processed_ids_path)
     since_date = (datetime.now() - timedelta(days=since_days)).strftime("%d-%b-%Y")
 

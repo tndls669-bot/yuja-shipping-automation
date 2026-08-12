@@ -2,11 +2,14 @@
 import smtplib
 from email.mime.text import MIMEText
 
+from network_compat import force_ipv4
+
 _SMTP_HOST = "smtp.gmail.com"
 _SMTP_PORT = 465
 
 
 def send_summary_email(subject: str, body: str, gmail_address: str, app_password: str, to_addr: str = None) -> None:
+    force_ipv4()
     to_addr = to_addr or gmail_address
     msg = MIMEText(body, _charset="utf-8")
     msg["Subject"] = subject
