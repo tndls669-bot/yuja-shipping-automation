@@ -1,5 +1,5 @@
 """표준 스키마 — 채널별 주문을 하나의 공통 구조로 통합."""
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from enum import Enum
 from typing import Optional
 
@@ -87,4 +87,30 @@ def build_standard_order(
         scheduled_delivery=scheduled_delivery,
         product_detail=product_detail,
         address_detail=address_detail,
+    )
+
+
+def order_to_dict(order: StandardOrder) -> dict:
+    """1단계에서 접수 대기 목록(JSON)에 저장할 때 씀 — 2단계가 그대로 복원해서 우체국에 접수."""
+    d = asdict(order)
+    d["channel"] = order.channel.value
+    d["product_group"] = order.product_group.value if order.product_group else None
+    return d
+
+
+def order_from_dict(d: dict) -> StandardOrder:
+    return StandardOrder(
+        channel=Channel(d["channel"]),
+        original_order_id=d["original_order_id"],
+        product_group=ProductGroup(d["product_group"]) if d.get("product_group") else None,
+        recipient_name=d["recipient_name"],
+        phone=d["phone"],
+        address=d["address"],
+        postal_code=d["postal_code"],
+        weight_or_qty=d.get("weight_or_qty"),
+        box_composition=d.get("box_composition", ""),
+        delivery_message=d.get("delivery_message", ""),
+        scheduled_delivery=d.get("scheduled_delivery", False),
+        product_detail=d.get("product_detail"),
+        address_detail=d.get("address_detail", ""),
     )
