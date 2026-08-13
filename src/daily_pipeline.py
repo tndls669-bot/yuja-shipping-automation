@@ -201,8 +201,15 @@ def run(
 
 
 if __name__ == "__main__":
+    import sys
+
     load_env(os.path.join(_BASE_DIR, ".env"))
     key = os.environ.get("GEMINI_API_KEY")
     if not key:
         raise SystemExit("GEMINI_API_KEY가 없습니다 (.env 파일 확인).")
-    run(key)
+
+    # 클라우드 샌드박스는 IMAP/SMTP 소켓(포트 993/465) 직접 연결을 차단한다.
+    # --cloud 실행 시에는 이메일을 Gmail 연동(MCP)으로 미리 data/inbox/*.txt에
+    # 옮겨둔 뒤 이 스크립트를 돌리므로 자체 IMAP 수신/SMTP 발송은 건너뛴다.
+    is_cloud = "--cloud" in sys.argv
+    run(key, fetch_emails=not is_cloud, send_email=not is_cloud)
