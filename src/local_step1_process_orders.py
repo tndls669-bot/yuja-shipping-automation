@@ -10,6 +10,7 @@ data/inbox/{날짜}/output/pending_epost_orders.json에 저장해두고, 오늘 
 import json
 import os
 from datetime import date
+from typing import Optional
 
 from aggregate_log import append_packages
 from courier_tier import orders_to_packages
@@ -21,6 +22,7 @@ from env_loader import load_env
 from excel_reader import extract_text_from_xlsx
 from generate_dashboard import write_dashboard
 from schema import Channel, order_to_dict
+from smartstore_excel_import import load_orders_from_encrypted_xlsx
 from text_order_parser import parse_orders_from_text
 from validation import validate_order
 
@@ -50,26 +52,42 @@ def ensure_folders(day_dir: str) -> None:
     os.makedirs(os.path.join(day_dir, "output"), exist_ok=True)
 
 
-def _read_folder_text(folder: str) -> str:
+def _try_smartstore_import(path: str) -> Optional[list]:
+    """네이버 스마트스토어 '선택주문발주발송관리' 암호화 엑셀이면 정확한 컬럼 매핑으로
+    바로 StandardOrder 목록을 반환한다(AI 파싱 불필요). 이 형식이 아니면 None."""
+    password = os.environ.get("SMARTSTORE_XLSX_PASSWORD", "123123")
+    try:
+        return load_orders_from_encrypted_xlsx(path, password)
+    except Exception:
+        return None
+
+
+def _collect_folder(folder: str) -> tuple[list, str]:
+    """폴더 안 파일을 훑어 (스마트스토어 주문 목록, 나머지 파일들의 텍스트 뭉치)로 나눈다."""
     if not os.path.isdir(folder):
-        return ""
-    parts = []
+        return [], ""
+    smartstore_orders = []
+    text_parts = []
     for name in sorted(os.listdir(folder)):
         path = os.path.join(folder, name)
         if not os.path.isfile(path):
             continue
         lower = name.lower()
         if lower.endswith((".xlsx", ".xls")):
+            orders = _try_smartstore_import(path)
+            if orders is not None:
+                smartstore_orders.extend(orders)
+                continue
             try:
-                parts.append(f"[파일: {name}]\n{extract_text_from_xlsx(path)}")
+                text_parts.append(f"[파일: {name}]\n{extract_text_from_xlsx(path)}")
             except Exception:
                 continue
         elif lower.endswith(".txt"):
             with open(path, "r", encoding="utf-8") as f:
                 text = f.read().strip()
             if text:
-                parts.append(f"[파일: {name}]\n{text}")
-    return "\n\n".join(parts)
+                text_parts.append(f"[파일: {name}]\n{text}")
+    return smartstore_orders, "\n\n".join(text_parts)
 
 
 def _archive_folder(folder: str) -> None:
@@ -172,12 +190,15 @@ def run(
     all_orders = []
     for subfolder, channel, prefix in _SUBFOLDERS:
         folder = os.path.join(day_dir, subfolder)
-        text = _read_folder_text(folder)
-        if not text:
-            continue
-        orders = parse_orders_from_text(text, channel, f"{prefix}-{today.replace('-', '')}", api_key=api_key)
-        all_orders.extend(orders)
-        _archive_folder(folder)
+        smartstore_orders, text = _collect_folder(folder)
+        if smartstore_orders:
+            # 스마트스토어 엑셀은 이미 실제 주문번호/컬럼이 정확히 매핑되어 있어 AI 파싱이 불필요.
+            all_orders.extend(smartstore_orders)
+        if text:
+            orders = parse_orders_from_text(text, channel, f"{prefix}-{today.replace('-', '')}", api_key=api_key)
+            all_orders.extend(orders)
+        if smartstore_orders or text:
+            _archive_folder(folder)
 
     wholesale_texts = _fetch_email_texts(senders_path, processed_email_ids_path)
     for i, text in enumerate(wholesale_texts, start=1):
