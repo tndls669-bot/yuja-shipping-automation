@@ -18,10 +18,11 @@ from env_loader import load_env
 from epost_api_client import insert_order
 from epost_order_submit import package_to_order_params
 from local_step1_process_orders import today_dir
+from naver_dispatch_export import write_naver_dispatch_excel
 from schema import order_from_dict
 
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_RESULT_HEADERS = ["받는사람", "품목", "박스/구간", "송장번호", "상태"]
+_RESULT_HEADERS = ["원주문번호", "받는사람", "품목", "박스/구간", "송장번호", "상태"]
 
 
 def _load_pending(output_dir: str) -> tuple[str, list]:
@@ -54,16 +55,24 @@ def run(today: str = None, send_email: bool = True) -> str:
     orders = [order_from_dict(d) for d in pending]
 
     rows = []
+    submit_results = []
     error_count = 0
     for package in orders_to_packages(orders):
         params = package_to_order_params(package, cust_no, appr_no, office_ser, order_comp_nm)
         try:
             response = insert_order(auth_key, security_key, params)
             tracking_no = response.get("regiNo", "")
-            rows.append([package.order.recipient_name, package.label, package.tier or "", tracking_no, "접수완료"])
+            rows.append([
+                package.order.original_order_id, package.order.recipient_name, package.label,
+                package.tier or "", tracking_no, "접수완료",
+            ])
+            submit_results.append((package, response))
         except Exception as e:
             error_count += 1
-            rows.append([package.order.recipient_name, package.label, package.tier or "", "", f"실패: {e}"])
+            rows.append([
+                package.order.original_order_id, package.order.recipient_name, package.label,
+                package.tier or "", "", f"실패: {e}",
+            ])
 
     result_csv = os.path.join(output_dir, f"{today}_epost_result.csv")
     with open(result_csv, "w", newline="", encoding="utf-8-sig") as f:
@@ -71,15 +80,23 @@ def run(today: str = None, send_email: bool = True) -> str:
         writer.writerow(_RESULT_HEADERS)
         writer.writerows(rows)
 
+    attachments = [result_csv]
+    naver_xlsx = os.path.join(output_dir, f"{today}_네이버발송처리.xlsx")
+    if write_naver_dispatch_excel(submit_results, naver_xlsx) > 0:
+        attachments.append(naver_xlsx)
+
     os.remove(pending_path)
 
     lines = [f"[{today}] 우체국 접수 결과 — 총 {len(rows)}건 (성공 {len(rows) - error_count}, 실패 {error_count})", ""]
     for r in rows:
-        status = f" - {r[4]}" if r[4] != "접수완료" else ""
-        lines.append(f"  - {r[0]} / {r[1]} / 송장번호: {r[3] or '(실패)'}{status}")
+        status = f" - {r[5]}" if r[5] != "접수완료" else ""
+        lines.append(f"  - {r[1]} / {r[2]} / 송장번호: {r[4] or '(실패)'}{status}")
     if error_count:
         lines.append("")
         lines.append(f"⚠ {error_count}건 접수 실패 — 확인 후 재시도 필요")
+    if naver_xlsx in attachments:
+        lines.append("")
+        lines.append("네이버 스마트스토어 발주발송관리 > 엑셀 일괄발송에 첨부된 엑셀 파일을 그대로 업로드하세요.")
     body = "\n".join(lines)
     print(body)
 
@@ -90,7 +107,7 @@ def run(today: str = None, send_email: bool = True) -> str:
             try:
                 send_summary_email(
                     f"[순수유자 발송자동화] {today} 우체국 접수 결과", body, gmail_address, app_password,
-                    attachments=[result_csv],
+                    attachments=attachments,
                 )
                 print("  이메일 발송 완료")
             except Exception as e:
