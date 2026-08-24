@@ -101,6 +101,33 @@ def test_raw_fruit_weight_parsed_from_product_name():
     assert orders[0].box_composition == "3kg박스×1(3kg적재)"
 
 
+def test_option_info_weight_wins_over_product_name_listing_all_options():
+    # 실제 스마트스토어 상품명은 "청유자 500g, 1kg, 3kg [옵션선택필수]"처럼 판매 가능한
+    # 중량을 전부 나열한다. 구매자가 실제로 고른 중량은 옵션정보에만 있으므로
+    # 그쪽을 우선해야 한다 (상품명의 첫 숫자 "500g"를 잘못 집으면 안 됨).
+    wb = _make_workbook([
+        {
+            "상품명": "순수유자 청유자 500g, 1kg, 3kg [옵션선택필수]",
+            "옵션정보": "중량: 3kg",
+            "수량": 1,
+            "상품주문번호": "id-5",
+            "수취인명": "정다은",
+            "수취인연락처1": "01099998888",
+        },
+        {
+            "상품명": "순수유자 청유자 500g, 1kg, 3kg [옵션선택필수]",
+            "옵션정보": "중량: 1kg",
+            "수량": 2,
+            "상품주문번호": "id-6",
+            "수취인명": "최우진",
+            "수취인연락처1": "01011119999",
+        },
+    ])
+    orders = orders_from_workbook(wb)
+    assert orders[0].weight_or_qty == 3
+    assert orders[1].weight_or_qty == 2
+
+
 def test_unrecognized_product_name_leaves_group_none():
     wb = _make_workbook([{
         "상품명": "포장 부자재 견본",

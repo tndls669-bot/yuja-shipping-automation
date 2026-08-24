@@ -17,6 +17,11 @@ from network_compat import force_ipv4
 
 _IMAP_HOST = "imap.gmail.com"
 
+# 대표님 본인 메일 주소가 위탁판매/전화문자 발신자 목록에 등록되어 있으면, 이 시스템이
+# 스스로 보낸 오더 리포트/접수 결과 메일까지 "새 주문"으로 다시 읽어버리는 무한 루프가
+# 생긴다. 이 제목으로 시작하는 메일(자동 발송 리포트)은 항상 건너뛴다.
+_AUTOMATION_SUBJECT_PREFIX = "[순수유자 발송자동화]"
+
 
 def load_sender_list(path: str) -> list[str]:
     if not os.path.exists(path):
@@ -121,9 +126,13 @@ def fetch_wholesale_emails(
                 if msg_id in processed_ids:
                     continue
 
+                subject = _decode(msg.get("Subject", ""))
+                if subject.startswith(_AUTOMATION_SUBJECT_PREFIX):
+                    newly_processed.add(msg_id)
+                    continue
+
                 text = _extract_body_and_excel_text(msg)
                 if text:
-                    subject = _decode(msg.get("Subject", ""))
                     new_texts.append(f"[보낸사람: {sender}] [제목: {subject}]\n{text}")
                 newly_processed.add(msg_id)
     finally:

@@ -44,9 +44,14 @@ def _classify_product(product_name: str):
 
 
 def _extract_weight_kg(product_name: str, option_info: str, qty: float):
-    text = f"{product_name or ''} {option_info or ''}"
-    match = re.search(r"(\d+(?:\.\d+)?)\s*(kg|g)\b", text, re.IGNORECASE)
-    if not match:
+    # 상품명에는 "청유자 500g, 1kg, 3kg"처럼 선택 가능한 옵션이 전부 나열되어 있는 경우가
+    # 많아, 실제 구매자가 고른 중량은 옵션정보(예: "중량: 1kg")를 먼저 확인해야 한다.
+    # 옵션정보에 중량 표기가 없을 때만 상품명에서 찾는다.
+    for text in (option_info, product_name):
+        match = re.search(r"(\d+(?:\.\d+)?)\s*(kg|g)\b", text or "", re.IGNORECASE)
+        if match:
+            break
+    else:
         return None
     value, unit = match.groups()
     value = float(value)
