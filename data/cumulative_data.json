@@ -1,25 +1,25 @@
 {
   "season_start_date": "2026-08-15",
-  "total_sales_units": 5,
-  "total_sales_weight_kg": 0.5,
+  "total_sales_units": 23,
+  "total_sales_weight_kg": 22.0,
   "cumulative_by_product": {
-    "청유자": 0,
+    "청유자": 18,
     "유자": 1,
     "유자청": 4
   },
   "cumulative_weight_by_product": {
-    "청유자": 0.0,
+    "청유자": 21.5,
     "유자": 0.5
   },
   "cumulative_by_weight_tier": {
-    "1kg": 1,
-    "3kg(4kg박스)": 0,
+    "1kg": 16,
+    "3kg(4kg박스)": 3,
     "8kg": 0
   },
   "cumulative_by_weight_tier_by_product": {
     "청유자": {
-      "1kg": 0,
-      "3kg(4kg박스)": 0,
+      "1kg": 15,
+      "3kg(4kg박스)": 3,
       "8kg": 0
     },
     "유자": {
@@ -29,7 +29,7 @@
     }
   },
   "cumulative_by_platform": {
-    "스마트스토어": 5,
+    "스마트스토어": 23,
     "위탁판매자": 0,
     "전화문자": 0
   },
