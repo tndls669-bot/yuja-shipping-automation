@@ -104,6 +104,28 @@ def test_issue_orders_are_excluded_from_pending_list():
         assert os.path.exists(os.path.join(day_dir, "output", "2026-08-14_issues.csv"))
 
 
+def test_gemini_failure_on_one_folder_does_not_lose_other_sources_orders():
+    # 위탁판매 폴더의 스마트스토어 엑셀(AI 파싱 불필요)은 성공해야 하고,
+    # 전화문자 폴더의 텍스트 파싱은 Gemini 오류로 실패해도 스마트스토어 주문은
+    # 정상적으로 저장되어야 한다(유실 금지). 실패한 전화문자 폴더는 archive되지 않아야
+    # 다음 실행 때 재시도된다.
+    def _fail_call(prompt, api_key, model=None):
+        raise RuntimeError("503 Service Unavailable")
+    text_order_parser.call_gemini_json = _fail_call
+
+    with tempfile.TemporaryDirectory() as inbox_root:
+        day_dir = step1.today_dir("2026-08-14", inbox_root)
+        step1.ensure_folders(day_dir)
+        with open(os.path.join(day_dir, "전화문자", "order1.txt"), "w", encoding="utf-8") as f:
+            f.write("문자로 받은 주문 텍스트")
+
+        _run(inbox_root)
+
+        # 실패한 폴더는 그대로 남아있어야 함 (archive 안 됨)
+        assert os.path.exists(os.path.join(day_dir, "전화문자", "order1.txt"))
+        assert not os.path.isdir(os.path.join(day_dir, "전화문자", "processed"))
+
+
 def test_empty_folders_produce_no_pending_list():
     with tempfile.TemporaryDirectory() as inbox_root:
         _run(inbox_root)

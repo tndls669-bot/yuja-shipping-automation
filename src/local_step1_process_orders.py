@@ -139,9 +139,14 @@ def _update_cumulative_and_dashboard(log_path: str, cumulative_path: str, dashbo
     return state
 
 
-def _build_report(today: str, ok_orders: list, issue_orders: list, cumulative_state: dict) -> str:
+def _build_report(today: str, ok_orders: list, issue_orders: list, cumulative_state: dict, failed_sources: list = None) -> str:
+    failed_sources = failed_sources or []
+
     if not ok_orders and not issue_orders:
-        return f"[{today}] 오늘 처리할 주문이 없습니다."
+        base = f"[{today}] 오늘 처리할 주문이 없습니다."
+        if failed_sources:
+            base += "\n\n⚠ 처리 실패한 소스 (재시도 필요):\n" + "\n".join(f"  - {f}" for f in failed_sources)
+        return base
 
     lines = [f"[{today}] 오더 리포트 — 정상 {len(ok_orders)}건, 확인필요 {len(issue_orders)}건", ""]
 
@@ -166,6 +171,12 @@ def _build_report(today: str, ok_orders: list, issue_orders: list, cumulative_st
         f"■ 시즌 누적 (시작일 {cumulative_state['season_start_date']})\n"
         f"  총 {cumulative_state['total_sales_weight_kg']:g}kg / {cumulative_state['total_sales_units']}건"
     )
+
+    if failed_sources:
+        lines.append("")
+        lines.append("⚠ 처리 실패한 소스 (재시도 필요):")
+        lines.extend(f"  - {f}" for f in failed_sources)
+
     return "\n".join(lines)
 
 
@@ -187,32 +198,48 @@ def run(
     ensure_folders(day_dir)
     output_dir = os.path.join(day_dir, "output")
 
+    # 소스 하나(예: Gemini 일시 장애)가 실패해도 이미 성공적으로 처리한 다른 소스의
+    # 주문은 절대 유실되면 안 된다. 소스별로 개별 try/except로 감싸고, 성공한 소스만
+    # 폴더 비우기(archive)를 하거나 다음 실행 때 재시도되도록 남겨둔다.
     all_orders = []
+    failed_sources = []
+
     for subfolder, channel, prefix in _SUBFOLDERS:
         folder = os.path.join(day_dir, subfolder)
         smartstore_orders, text = _collect_folder(folder)
-        if smartstore_orders:
-            # 스마트스토어 엑셀은 이미 실제 주문번호/컬럼이 정확히 매핑되어 있어 AI 파싱이 불필요.
-            all_orders.extend(smartstore_orders)
-        if text:
-            orders = parse_orders_from_text(text, channel, f"{prefix}-{today.replace('-', '')}", api_key=api_key)
-            all_orders.extend(orders)
-        if smartstore_orders or text:
-            _archive_folder(folder)
+        try:
+            text_orders = []
+            if text:
+                text_orders = parse_orders_from_text(
+                    text, channel, f"{prefix}-{today.replace('-', '')}", api_key=api_key
+                )
+        except Exception as e:
+            failed_sources.append(f"{subfolder} 폴더 텍스트 파싱 실패 (파일은 그대로 남겨둠, 다음 실행 때 재시도됨): {e}")
+        else:
+            if smartstore_orders:
+                # 스마트스토어 엑셀은 이미 실제 주문번호/컬럼이 정확히 매핑되어 있어 AI 파싱이 불필요.
+                all_orders.extend(smartstore_orders)
+            all_orders.extend(text_orders)
+            if smartstore_orders or text:
+                _archive_folder(folder)
 
-    wholesale_texts = _fetch_email_texts(senders_path, processed_email_ids_path)
-    for i, text in enumerate(wholesale_texts, start=1):
-        orders = parse_orders_from_text(
-            text, Channel.WHOLESALE, f"wholesale-{today.replace('-', '')}-mail{i:03d}", api_key=api_key
-        )
-        all_orders.extend(orders)
+    def _fetch_and_parse(senders_path_, processed_ids_path_, channel, prefix):
+        texts = _fetch_email_texts(senders_path_, processed_ids_path_)
+        for i, text in enumerate(texts, start=1):
+            try:
+                orders = parse_orders_from_text(text, channel, f"{prefix}-{today.replace('-', '')}-mail{i:03d}", api_key=api_key)
+            except Exception as e:
+                # 메일은 이미 "처리됨"으로 표시돼 다시 못 읽어오므로, 원문을 잃지 않게 파일로 남긴다.
+                recovery_path = os.path.join(output_dir, f"재처리필요_{prefix}_{i:03d}.txt")
+                os.makedirs(output_dir, exist_ok=True)
+                with open(recovery_path, "w", encoding="utf-8") as f:
+                    f.write(text)
+                failed_sources.append(f"메일 {i}번({prefix}) 파싱 실패 — 원문을 {recovery_path}에 저장함: {e}")
+            else:
+                all_orders.extend(orders)
 
-    phone_texts = _fetch_email_texts(phone_senders_path, processed_phone_email_ids_path)
-    for i, text in enumerate(phone_texts, start=1):
-        orders = parse_orders_from_text(
-            text, Channel.PHONE_TEXT, f"phone-{today.replace('-', '')}-mail{i:03d}", api_key=api_key
-        )
-        all_orders.extend(orders)
+    _fetch_and_parse(senders_path, processed_email_ids_path, Channel.WHOLESALE, "wholesale")
+    _fetch_and_parse(phone_senders_path, processed_phone_email_ids_path, Channel.PHONE_TEXT, "phone")
 
     ok_orders, issue_orders = [], []
     for order in all_orders:
@@ -234,7 +261,7 @@ def run(
         _save_pending(output_dir, ok_orders)
 
     cumulative_state = _update_cumulative_and_dashboard(log_path, cumulative_path, dashboard_path)
-    report = _build_report(today, ok_orders, issue_orders, cumulative_state)
+    report = _build_report(today, ok_orders, issue_orders, cumulative_state, failed_sources)
     print(report)
 
     if send_email:

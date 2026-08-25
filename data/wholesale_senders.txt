@@ -3,3 +3,4 @@
 # 예시:
 # seller1@example.com
 # seller2@naver.com
+farm@uglyus.co.kr
