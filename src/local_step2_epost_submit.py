@@ -20,6 +20,7 @@ from epost_order_submit import package_to_order_params
 from local_step1_process_orders import today_dir
 from naver_dispatch_export import write_naver_dispatch_excel
 from schema import order_from_dict
+from uglyus_dispatch_export import write_uglyus_dispatch_excel
 
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _RESULT_HEADERS = ["원주문번호", "받는사람", "품목", "박스/구간", "송장번호", "상태"]
@@ -87,6 +88,9 @@ def run(today: str = None, send_email: bool = True) -> str:
     naver_xlsx = os.path.join(output_dir, f"{today}_네이버발송처리.xlsx")
     if write_naver_dispatch_excel(submit_results, naver_xlsx) > 0:
         attachments.append(naver_xlsx)
+    uglyus_xlsx = os.path.join(output_dir, f"{today}_어글리어스송장등록.xlsx")
+    if write_uglyus_dispatch_excel(submit_results, uglyus_xlsx) > 0:
+        attachments.append(uglyus_xlsx)
 
     os.remove(pending_path)
 
@@ -100,6 +104,9 @@ def run(today: str = None, send_email: bool = True) -> str:
     if naver_xlsx in attachments:
         lines.append("")
         lines.append("네이버 스마트스토어 발주발송관리 > 엑셀 일괄발송에 첨부된 엑셀 파일을 그대로 업로드하세요.")
+    if uglyus_xlsx in attachments:
+        lines.append("")
+        lines.append("어글리어스 송장 등록 페이지(메일/카톡으로 오는 링크)에 첨부된 엑셀 파일을 그대로 업로드하세요.")
     body = "\n".join(lines)
     print(body)
 

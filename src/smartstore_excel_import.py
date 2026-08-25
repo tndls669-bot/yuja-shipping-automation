@@ -4,60 +4,19 @@
 같은 파이프라인에 태울 수 있게 해주는 임시 노드. 나중에 커머스API가 연결되면
 이 모듈은 그대로 두고 daily_pipeline에 API 조회 노드만 추가하면 된다.
 
-상품명 → 품목군/세부품목 매칭은 지금까지 확인된 실제 상품명 문구(예: "저당유자청")
-기준의 키워드 규칙이다. 새로운 상품명 패턴이 나오면 _classify_product에 규칙을 추가해야 한다.
+상품명 → 품목군/세부품목/중량 매칭 규칙은 product_parsing.py에 공용으로 있다
+(어글리어스 등 다른 위탁판매자 주문서 파서와 공유).
 """
 import io
-import re
 
 import msoffcrypto
 import openpyxl
 
-from schema import (
-    Channel,
-    ProductGroup,
-    StandardOrder,
-    YujacheongProduct,
-    compute_box_composition,
-    normalize_phone,
-)
+from product_parsing import classify_product, extract_weight_kg
+from schema import Channel, ProductGroup, StandardOrder, compute_box_composition, normalize_phone
 
 _HEADER_ROW_INDEX = 2  # 1-based: 1행은 안내문, 2행이 실제 헤더
 _ORDER_ID_COL = "상품주문번호"
-
-
-def _classify_product(product_name: str):
-    name = product_name or ""
-    if "유자청" in name:
-        if "저당" in name:
-            return ProductGroup.YUJACHEONG, YujacheongProduct.LOW_SUGAR.value
-        if "레몬첼로" in name:
-            return ProductGroup.YUJACHEONG, YujacheongProduct.LEMONCELLO.value
-        if "디오가닉" in name:
-            return ProductGroup.YUJACHEONG, YujacheongProduct.DIORGANIC.value
-        return ProductGroup.YUJACHEONG, None
-    if "청유자" in name:
-        return ProductGroup.CHEONGYUJA, None
-    if "유자" in name:
-        return ProductGroup.YUJA, None
-    return None, None
-
-
-def _extract_weight_kg(product_name: str, option_info: str, qty: float):
-    # 상품명에는 "청유자 500g, 1kg, 3kg"처럼 선택 가능한 옵션이 전부 나열되어 있는 경우가
-    # 많아, 실제 구매자가 고른 중량은 옵션정보(예: "중량: 1kg")를 먼저 확인해야 한다.
-    # 옵션정보에 중량 표기가 없을 때만 상품명에서 찾는다.
-    for text in (option_info, product_name):
-        match = re.search(r"(\d+(?:\.\d+)?)\s*(kg|g)\b", text or "", re.IGNORECASE)
-        if match:
-            break
-    else:
-        return None
-    value, unit = match.groups()
-    value = float(value)
-    if unit.lower() == "g":
-        value = value / 1000
-    return round(value * qty, 3)
 
 
 def orders_from_workbook(wb) -> list[StandardOrder]:
@@ -78,12 +37,12 @@ def orders_from_workbook(wb) -> list[StandardOrder]:
         product_name = get("상품명")
         option_info = get("옵션정보")
         qty = get("수량") or 1
-        product_group, product_detail = _classify_product(product_name)
+        product_group, product_detail = classify_product(product_name)
 
         if product_group == ProductGroup.YUJACHEONG:
             weight_or_qty = qty
         elif product_group in (ProductGroup.CHEONGYUJA, ProductGroup.YUJA):
-            weight_or_qty = _extract_weight_kg(product_name, option_info, qty)
+            weight_or_qty = extract_weight_kg(product_name, option_info, qty)
         else:
             weight_or_qty = None
 

@@ -23,6 +23,7 @@ from excel_reader import extract_text_from_xlsx
 from generate_dashboard import write_dashboard
 from schema import Channel, order_to_dict
 from smartstore_excel_import import load_orders_from_encrypted_xlsx
+from uglyus_order_import import parse_uglyus_table
 from text_order_parser import parse_orders_from_text
 from validation import validate_order
 
@@ -226,6 +227,12 @@ def run(
     def _fetch_and_parse(senders_path_, processed_ids_path_, channel, prefix):
         texts = _fetch_email_texts(senders_path_, processed_ids_path_)
         for i, text in enumerate(texts, start=1):
+            # 어글리어스 등 알려진 위탁판매자 주문서 표 형식이면 AI 파싱 없이 정확한
+            # 컬럼 매핑으로 바로 처리한다(실제 주문번호를 정확히 잡아야 하기 때문).
+            uglyus_orders = parse_uglyus_table(text)
+            if uglyus_orders is not None:
+                all_orders.extend(uglyus_orders)
+                continue
             try:
                 orders = parse_orders_from_text(text, channel, f"{prefix}-{today.replace('-', '')}-mail{i:03d}", api_key=api_key)
             except Exception as e:
