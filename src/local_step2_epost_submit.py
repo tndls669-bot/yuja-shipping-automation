@@ -74,10 +74,13 @@ def run(today: str = None, send_email: bool = True) -> str:
                 package.tier or "", "", f"실패: {e}",
             ])
 
+    # 하루에 2단계를 여러 번 실행할 수 있으므로(추가 주문 등) 기존 결과를 덮어쓰지 않고 이어붙인다.
     result_csv = os.path.join(output_dir, f"{today}_epost_result.csv")
-    with open(result_csv, "w", newline="", encoding="utf-8-sig") as f:
+    write_header = not os.path.exists(result_csv)
+    with open(result_csv, "a", newline="", encoding="utf-8-sig") as f:
         writer = csv.writer(f)
-        writer.writerow(_RESULT_HEADERS)
+        if write_header:
+            writer.writerow(_RESULT_HEADERS)
         writer.writerows(rows)
 
     attachments = [result_csv]

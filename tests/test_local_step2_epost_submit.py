@@ -128,6 +128,43 @@ def test_smartstore_orders_produce_naver_dispatch_excel():
         assert [c.value for c in ws[2]] == ["2026082512345", "택배,등기,소포", "우체국택배", "6890166064699"]
 
 
+def test_second_run_same_day_accumulates_csv_and_dispatch_file():
+    order1 = build_standard_order(
+        Channel.SMARTSTORE, "id-1", ProductGroup.CHEONGYUJA,
+        "조용만", "01011112222", "전남 고흥군 ...", "59554", 3,
+    )
+    order2 = build_standard_order(
+        Channel.SMARTSTORE, "id-2", ProductGroup.CHEONGYUJA,
+        "송호연", "01033334444", "전남 고흥군 ...", "59554", 3,
+    )
+
+    with tempfile.TemporaryDirectory() as inbox_root:
+        _set_epost_env()
+        original_today_dir = step2.today_dir
+        original_insert_order = step2.insert_order
+        step2.today_dir = lambda today: step1.today_dir(today, inbox_root)
+        try:
+            output_dir = _write_pending(inbox_root, "2026-08-14", [order1])
+            step2.insert_order = lambda auth_key, security_key, params: {"regiNo": "111"}
+            step2.run(today="2026-08-14", send_email=False)
+
+            _write_pending(inbox_root, "2026-08-14", [order2])
+            step2.insert_order = lambda auth_key, security_key, params: {"regiNo": "222"}
+            step2.run(today="2026-08-14", send_email=False)
+        finally:
+            step2.today_dir = original_today_dir
+            step2.insert_order = original_insert_order
+
+        with open(os.path.join(output_dir, "2026-08-14_epost_result.csv"), encoding="utf-8-sig") as f:
+            rows = list(csv.reader(f))
+        assert [r[0] for r in rows[1:]] == ["id-1", "id-2"]
+        assert sum(1 for r in rows if r and r[0] == "원주문번호") == 1
+
+        wb = openpyxl.load_workbook(os.path.join(output_dir, "2026-08-14_네이버발송처리.xlsx"))
+        ws = wb["발송처리"]
+        assert [ws.cell(r, 1).value for r in range(2, ws.max_row + 1)] == ["id-1", "id-2"]
+
+
 if __name__ == "__main__":
     tests = [obj for name, obj in list(globals().items()) if name.startswith("test_")]
     for t in tests:

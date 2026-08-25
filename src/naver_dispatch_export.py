@@ -5,6 +5,8 @@
 (안내문에 따르면 시트명이 반드시 "발송처리", 컬럼은 상품주문번호/배송방법/택배사/송장번호)
 API 연동되면 이 모듈은 그대로 두고 daily_pipeline에 커머스API 호출 노드만 추가하면 된다.
 """
+import os
+
 import openpyxl
 
 from schema import Channel
@@ -18,12 +20,18 @@ _COURIER_NAME = "우체국택배"
 def write_naver_dispatch_excel(submit_results: list, output_path: str) -> int:
     """submit_results: epost_order_submit.submit_orders()가 반환하는 (package, response) 리스트.
 
-    스마트스토어 채널 주문만 골라서 파일로 쓴다. 반환값은 실제로 쓴 행 수.
+    스마트스토어 채널 주문만 골라서 파일로 쓴다. output_path가 이미 있으면(하루에
+    2단계를 여러 번 실행한 경우) 기존 행을 지우지 않고 이어붙인다. 반환값은 이번 호출로
+    새로 쓴 행 수(누적 총 행 수가 아님).
     """
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = _SHEET_NAME
-    ws.append(_HEADERS)
+    if os.path.exists(output_path):
+        wb = openpyxl.load_workbook(output_path)
+        ws = wb[_SHEET_NAME] if _SHEET_NAME in wb.sheetnames else wb.active
+    else:
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = _SHEET_NAME
+        ws.append(_HEADERS)
 
     row_count = 0
     for package, response in submit_results:

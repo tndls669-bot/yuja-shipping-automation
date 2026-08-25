@@ -48,6 +48,29 @@ def test_non_smartstore_orders_are_excluded():
         assert row_count == 0
 
 
+def test_second_call_same_day_appends_instead_of_overwriting():
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        path = os.path.join(tmp_dir, "dispatch.xlsx")
+
+        first_batch = [
+            (Package(_order(Channel.SMARTSTORE, "id-1", "조용만"), "유자청", "2kg"), {"regiNo": "111"}),
+        ]
+        write_naver_dispatch_excel(first_batch, path)
+
+        second_batch = [
+            (Package(_order(Channel.SMARTSTORE, "id-2", "송호연"), "유자청", "2kg"), {"regiNo": "222"}),
+        ]
+        row_count = write_naver_dispatch_excel(second_batch, path)
+
+        assert row_count == 1
+        wb = openpyxl.load_workbook(path)
+        ws = wb["발송처리"]
+        assert [c.value for c in ws[1]] == ["상품주문번호", "배송방법", "택배사", "송장번호"]
+        assert [c.value for c in ws[2]][:1] == ["id-1"]
+        assert [c.value for c in ws[3]][:1] == ["id-2"]
+        assert ws.max_row == 3
+
+
 def test_test_mode_tracking_numbers_are_excluded():
     results = [
         (Package(_order(Channel.SMARTSTORE, "id-1"), "유자청", "2kg"), {"regiNo": "TESTREGINOAPI"}),
