@@ -1,5 +1,7 @@
+import json
 import os
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
@@ -8,6 +10,7 @@ from naver_order_api_import import (  # noqa: E402
     fetch_new_order_ids,
     fetch_order_details,
     fetch_new_orders,
+    fetch_actionable_orders,
     order_detail_to_standard_order,
 )
 
@@ -50,13 +53,22 @@ _LAST_CHANGED_RESPONSE = {
 
 
 class _FakeClient:
+    """responses_by_path 값이 list면 호출할 때마다 순서대로 하나씩 꺼내 쓰고,
+    dict면 매번 그대로 반환한다."""
+
     def __init__(self, responses_by_path):
         self._responses = responses_by_path
+        self._call_counts = {}
         self.calls = []
 
     def call(self, path, method="GET", params=None, json_body=None):
         self.calls.append((path, method, params, json_body))
-        return self._responses[path]
+        response = self._responses[path]
+        if isinstance(response, list):
+            i = self._call_counts.get(path, 0)
+            self._call_counts[path] = i + 1
+            return response[i]
+        return response
 
 
 def test_order_detail_to_standard_order_maps_real_shape_correctly():
@@ -94,6 +106,97 @@ def test_fetch_new_orders_end_to_end_with_fake_client():
     orders = fetch_new_orders(client, "2026-08-26T00:00:00.000+09:00")
     assert len(orders) == 1
     assert orders[0].recipient_name == "문정원"
+
+
+def _detail_response(product_order_id, name, status="PAYED"):
+    return {
+        "data": [
+            {
+                "order": {"orderId": "order-" + product_order_id, "ordererName": name},
+                "productOrder": {
+                    "productOrderId": product_order_id,
+                    "quantity": 1,
+                    "productOrderStatus": status,
+                    "productName": "고흥 유기농 청유자 500g, 1kg, 3kg [생산자판매]",
+                    "productOption": "중량: 500g",
+                    "shippingAddress": {
+                        "name": name, "tel1": "01011112222", "zipCode": "11111",
+                        "baseAddress": "주소", "detailedAddress": "상세주소",
+                    },
+                },
+            }
+        ]
+    }
+
+
+def test_fetch_actionable_orders_finds_new_payed_order_on_first_run():
+    client = _FakeClient({
+        "/v1/pay-order/seller/product-orders/last-changed-statuses": {
+            "data": {"lastChangeStatuses": [{"productOrderId": "id-1", "productOrderStatus": "PAYED"}]}
+        },
+        "/v1/pay-order/seller/product-orders/query": _detail_response("id-1", "홍길동"),
+    })
+    with tempfile.TemporaryDirectory() as tmp:
+        state_path = os.path.join(tmp, "naver_state.json")
+        orders = fetch_actionable_orders(client, state_path, "2026-08-27T12:00:00.000+09:00")
+        assert len(orders) == 1
+        assert orders[0].recipient_name == "홍길동"
+
+        with open(state_path, encoding="utf-8") as f:
+            state = json.load(f)
+        assert state["pending_order_ids"] == ["id-1"]
+        assert state["last_checked"] == "2026-08-27T12:00:00.000+09:00"
+
+
+def test_still_payed_order_is_not_lost_when_it_ages_out_of_recent_changes():
+    # 1차 실행: id-1이 신규 PAYED로 발견됨
+    client1 = _FakeClient({
+        "/v1/pay-order/seller/product-orders/last-changed-statuses": {
+            "data": {"lastChangeStatuses": [{"productOrderId": "id-1", "productOrderStatus": "PAYED"}]}
+        },
+        "/v1/pay-order/seller/product-orders/query": _detail_response("id-1", "문정원"),
+    })
+    with tempfile.TemporaryDirectory() as tmp:
+        state_path = os.path.join(tmp, "naver_state.json")
+        fetch_actionable_orders(client1, state_path, "2026-08-26T21:00:00.000+09:00")
+
+        # 2차 실행: id-1이 "최근 변경 내역"에서는 사라졌지만(창밖으로 밀려남) 여전히 PAYED
+        client2 = _FakeClient({
+            "/v1/pay-order/seller/product-orders/last-changed-statuses": {
+                "data": {"lastChangeStatuses": []}
+            },
+            "/v1/pay-order/seller/product-orders/query": _detail_response("id-1", "문정원"),
+        })
+        orders = fetch_actionable_orders(client2, state_path, "2026-08-27T12:00:00.000+09:00")
+
+        assert len(orders) == 1
+        assert orders[0].recipient_name == "문정원"
+
+
+def test_order_dropped_from_pending_once_it_is_no_longer_payed():
+    client1 = _FakeClient({
+        "/v1/pay-order/seller/product-orders/last-changed-statuses": {
+            "data": {"lastChangeStatuses": [{"productOrderId": "id-1", "productOrderStatus": "PAYED"}]}
+        },
+        "/v1/pay-order/seller/product-orders/query": _detail_response("id-1", "김선명"),
+    })
+    with tempfile.TemporaryDirectory() as tmp:
+        state_path = os.path.join(tmp, "naver_state.json")
+        fetch_actionable_orders(client1, state_path, "2026-08-26T21:00:00.000+09:00")
+
+        # 다른 경로(예: 판매자센터에서 수동 처리)로 이미 발송처리되어 상태가 바뀐 경우
+        client2 = _FakeClient({
+            "/v1/pay-order/seller/product-orders/last-changed-statuses": {
+                "data": {"lastChangeStatuses": []}
+            },
+            "/v1/pay-order/seller/product-orders/query": _detail_response("id-1", "김선명", status="DISPATCHED"),
+        })
+        orders = fetch_actionable_orders(client2, state_path, "2026-08-27T12:00:00.000+09:00")
+
+        assert orders == []
+        with open(state_path, encoding="utf-8") as f:
+            state = json.load(f)
+        assert state["pending_order_ids"] == []
 
 
 if __name__ == "__main__":

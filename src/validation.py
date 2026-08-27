@@ -10,6 +10,10 @@ def validate_order(order) -> list[str]:
     issues = []
     if not order.address or order.address == ".":
         issues.append("주소 누락")
+    if not order.postal_code:
+        # 우체국 API가 우편번호 없이는 접수 자체를 거부한다(실제로 이 문제로 접수
+        # 실패가 난 적이 있음) — 여기서 미리 걸러야 2단계에서 뒤늦게 실패하지 않는다.
+        issues.append("우편번호 누락")
     if not order.phone or not _PHONE_PATTERN.match(order.phone):
         issues.append(f"전화번호 형식 이상: {order.phone!r}")
     if order.product_group is None:

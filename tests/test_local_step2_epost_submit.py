@@ -101,6 +101,36 @@ def test_api_failure_is_recorded_but_does_not_crash():
         assert "실패" in rows[1][5]
 
 
+def test_response_without_tracking_number_is_treated_as_failure_not_success():
+    # 우체국 서버가 200 응답을 주면서도 regiNo가 빠진 비정상 케이스 — 성공(접수완료)으로
+    # 잘못 기록되면 대표님이 실제로는 안 나간 물건을 나간 걸로 착각할 수 있음.
+    order = build_standard_order(
+        Channel.PHONE_TEXT, "phone-1", ProductGroup.YUJACHEONG,
+        "이동훈", "01090291152", "서울 마포구 ...", "04021", 1,
+    )
+
+    with tempfile.TemporaryDirectory() as inbox_root:
+        output_dir = _write_pending(inbox_root, "2026-08-14", [order])
+        _set_epost_env()
+
+        original_today_dir = step2.today_dir
+        original_insert_order = step2.insert_order
+        step2.today_dir = lambda today: step1.today_dir(today, inbox_root)
+        step2.insert_order = lambda auth_key, security_key, params: {"resultCode": "OK"}  # regiNo 없음
+        try:
+            result = step2.run(today="2026-08-14", send_email=False)
+        finally:
+            step2.today_dir = original_today_dir
+            step2.insert_order = original_insert_order
+
+        assert "실패 1" in result
+        with open(os.path.join(output_dir, "2026-08-14_epost_result.csv"), encoding="utf-8-sig") as f:
+            rows = list(csv.reader(f))
+        assert rows[1][4] == ""  # 송장번호 없음
+        assert "실패" in rows[1][5]
+        assert "접수완료" not in rows[1][5]
+
+
 def test_smartstore_orders_produce_naver_dispatch_excel():
     order = build_standard_order(
         Channel.SMARTSTORE, "2026082512345", ProductGroup.CHEONGYUJA,

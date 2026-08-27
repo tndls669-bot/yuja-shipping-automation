@@ -9,7 +9,7 @@ data/inbox/{날짜}/output/pending_epost_orders.json에 저장해두고, 오늘 
 """
 import json
 import os
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
 
 from aggregate_log import append_packages
@@ -21,6 +21,8 @@ from email_sender import send_summary_email
 from env_loader import load_env
 from excel_reader import extract_text_from_xlsx
 from generate_dashboard import write_dashboard
+from naver_commerce_api import NaverCommerceClient
+from naver_order_api_import import fetch_actionable_orders
 from schema import Channel, order_to_dict
 from smartstore_excel_import import load_orders_from_encrypted_xlsx
 from uglyus_order_import import parse_uglyus_table
@@ -36,6 +38,7 @@ _PROCESSED_EMAIL_IDS_PATH = os.path.join(_BASE_DIR, "data", "processed_email_ids
 _PHONE_SENDERS_PATH = os.path.join(_BASE_DIR, "data", "phone_text_senders.txt")
 _PROCESSED_PHONE_EMAIL_IDS_PATH = os.path.join(_BASE_DIR, "data", "processed_phone_email_ids.json")
 _AGGREGATE_LOG_PATH = os.path.join(_BASE_DIR, "data", "aggregate_log.csv")
+_NAVER_API_STATE_PATH = os.path.join(_BASE_DIR, "data", "naver_api_state.json")
 
 _SUBFOLDERS = [
     ("위탁판매", Channel.WHOLESALE, "wholesale"),
@@ -193,6 +196,7 @@ def run(
     log_path: str = _AGGREGATE_LOG_PATH,
     cumulative_path: str = _CUMULATIVE_PATH,
     dashboard_path: str = _DASHBOARD_PATH,
+    naver_api_state_path: str = _NAVER_API_STATE_PATH,
 ) -> None:
     today = today or date.today().isoformat()
     day_dir = today_dir(today, inbox_root)
@@ -247,6 +251,17 @@ def run(
 
     _fetch_and_parse(senders_path, processed_email_ids_path, Channel.WHOLESALE, "wholesale")
     _fetch_and_parse(phone_senders_path, processed_phone_email_ids_path, Channel.PHONE_TEXT, "phone")
+
+    naver_client_id = os.environ.get("NAVER_CLIENT_ID")
+    naver_client_secret = os.environ.get("NAVER_CLIENT_SECRET")
+    if naver_client_id and naver_client_secret:
+        try:
+            client = NaverCommerceClient(naver_client_id, naver_client_secret)
+            now_iso = datetime.now().astimezone().isoformat(timespec="milliseconds")
+            naver_orders = fetch_actionable_orders(client, naver_api_state_path, now_iso)
+            all_orders.extend(naver_orders)
+        except Exception as e:
+            failed_sources.append(f"네이버 커머스API 주문 조회 실패 (다음 실행 때 자동 재시도됨): {e}")
 
     ok_orders, issue_orders = [], []
     for order in all_orders:

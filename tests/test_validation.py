@@ -7,9 +7,9 @@ from schema import Channel, ProductGroup, build_standard_order  # noqa: E402
 from validation import validate_order  # noqa: E402
 
 
-def _order(phone, address="전남 고흥군 ...", product_group=ProductGroup.CHEONGYUJA, weight_or_qty=3):
+def _order(phone, address="전남 고흥군 ...", product_group=ProductGroup.CHEONGYUJA, weight_or_qty=3, postal_code="59554"):
     return build_standard_order(
-        Channel.WHOLESALE, "id-1", product_group, "홍길동", phone, address, "59554", weight_or_qty,
+        Channel.WHOLESALE, "id-1", product_group, "홍길동", phone, address, postal_code, weight_or_qty,
     )
 
 
@@ -34,6 +34,12 @@ def test_garbage_phone_is_flagged():
 def test_missing_address_is_flagged():
     order = _order("010-1234-5678", address="")
     assert "주소 누락" in validate_order(order)
+
+
+def test_missing_postal_code_is_flagged():
+    # 우체국 API가 우편번호 없이는 접수를 거부하므로(recZip 필수) 1단계에서 미리 걸러야 함
+    order = _order("010-1234-5678", postal_code="")
+    assert "우편번호 누락" in validate_order(order)
 
 
 if __name__ == "__main__":

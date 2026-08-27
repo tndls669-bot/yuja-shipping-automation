@@ -63,6 +63,10 @@ def run(today: str = None, send_email: bool = True) -> str:
         try:
             response = insert_order(auth_key, security_key, params)
             tracking_no = response.get("regiNo", "")
+            if not tracking_no:
+                # HTTP는 200으로 왔지만 송장번호가 없는 비정상 응답 — 성공으로 잘못
+                # 표시하면 안 되니 실패로 취급한다.
+                raise RuntimeError(f"송장번호 없이 응답이 왔습니다: {response}")
             rows.append([
                 package.order.original_order_id, package.order.recipient_name, package.label,
                 package.tier or "", tracking_no, "접수완료",

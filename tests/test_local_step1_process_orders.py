@@ -28,6 +28,7 @@ def _run(inbox_root, today="2026-08-14", **kwargs):
     kwargs.setdefault("log_path", os.path.join(inbox_root, "aggregate_log.csv"))
     kwargs.setdefault("cumulative_path", os.path.join(inbox_root, "cumulative_data.json"))
     kwargs.setdefault("dashboard_path", os.path.join(inbox_root, "dashboard.html"))
+    kwargs.setdefault("naver_api_state_path", os.path.join(inbox_root, "naver_api_state.json"))
     step1.run("dummy-key", today=today, inbox_root=inbox_root, **kwargs)
 
 
@@ -124,6 +125,91 @@ def test_gemini_failure_on_one_folder_does_not_lose_other_sources_orders():
         # 실패한 폴더는 그대로 남아있어야 함 (archive 안 됨)
         assert os.path.exists(os.path.join(day_dir, "전화문자", "order1.txt"))
         assert not os.path.isdir(os.path.join(day_dir, "전화문자", "processed"))
+
+
+def test_naver_api_orders_are_included_when_credentials_present():
+    from schema import Channel, ProductGroup, build_standard_order
+
+    naver_order = build_standard_order(
+        Channel.SMARTSTORE, "naver-1", ProductGroup.CHEONGYUJA,
+        "문정원", "01062521483", "경기도 김포시 ...", "10124", 0.5,
+    )
+
+    old_client = step1.NaverCommerceClient
+    old_fetch = step1.fetch_actionable_orders
+    step1.NaverCommerceClient = lambda client_id, client_secret: object()
+    step1.fetch_actionable_orders = lambda client, state_path, now_iso: [naver_order]
+
+    old_env = {k: os.environ.get(k) for k in ("NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET")}
+    os.environ["NAVER_CLIENT_ID"] = "id"
+    os.environ["NAVER_CLIENT_SECRET"] = "secret"
+    try:
+        with tempfile.TemporaryDirectory() as inbox_root:
+            _run(inbox_root)
+            output_dir = os.path.join(step1.today_dir("2026-08-14", inbox_root), "output")
+            with open(os.path.join(output_dir, "pending_epost_orders.json"), encoding="utf-8") as f:
+                pending = json.load(f)
+            assert len(pending) == 1
+            assert pending[0]["recipient_name"] == "문정원"
+    finally:
+        step1.NaverCommerceClient = old_client
+        step1.fetch_actionable_orders = old_fetch
+        for k, v in old_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+def test_naver_api_failure_does_not_lose_other_sources_orders():
+    text_order_parser.call_gemini_json = _stub_per_call([
+        [
+            {
+                "recipient_name": "홍길동",
+                "phone": "010-1234-5678",
+                "address": "전남 고흥군 ...",
+                "postal_code": "59554",
+                "product_group": "청유자",
+                "weight_or_qty": 7,
+                "delivery_message": None,
+                "scheduled_delivery": False,
+            }
+        ],
+    ])
+
+    def _fail(client, state_path, now_iso):
+        raise RuntimeError("네이버 API 오류")
+
+    old_client = step1.NaverCommerceClient
+    old_fetch = step1.fetch_actionable_orders
+    step1.NaverCommerceClient = lambda client_id, client_secret: object()
+    step1.fetch_actionable_orders = _fail
+
+    old_env = {k: os.environ.get(k) for k in ("NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET")}
+    os.environ["NAVER_CLIENT_ID"] = "id"
+    os.environ["NAVER_CLIENT_SECRET"] = "secret"
+    try:
+        with tempfile.TemporaryDirectory() as inbox_root:
+            day_dir = step1.today_dir("2026-08-14", inbox_root)
+            step1.ensure_folders(day_dir)
+            with open(os.path.join(day_dir, "전화문자", "order1.txt"), "w", encoding="utf-8") as f:
+                f.write("홍길동 010-1234-5678 청유자 7kg")
+
+            _run(inbox_root)
+
+            output_dir = os.path.join(day_dir, "output")
+            with open(os.path.join(output_dir, "pending_epost_orders.json"), encoding="utf-8") as f:
+                pending = json.load(f)
+            assert len(pending) == 1
+            assert pending[0]["recipient_name"] == "홍길동"
+    finally:
+        step1.NaverCommerceClient = old_client
+        step1.fetch_actionable_orders = old_fetch
+        for k, v in old_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
 
 
 def test_empty_folders_produce_no_pending_list():
