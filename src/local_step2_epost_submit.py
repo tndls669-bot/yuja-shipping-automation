@@ -18,8 +18,10 @@ from env_loader import load_env
 from epost_api_client import insert_order
 from epost_order_submit import package_to_order_params
 from local_step1_process_orders import today_dir
+from naver_commerce_api import NaverCommerceClient
+from naver_dispatch_api import dispatch_orders
 from naver_dispatch_export import write_naver_dispatch_excel
-from schema import order_from_dict
+from schema import Channel, order_from_dict
 from uglyus_dispatch_export import write_uglyus_dispatch_excel
 
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -88,9 +90,30 @@ def run(today: str = None, send_email: bool = True) -> str:
             writer.writerow(_RESULT_HEADERS)
         writer.writerows(rows)
 
+    # 스마트스토어 채널은 가능하면 네이버 발송처리 API로 바로 등록한다(엑셀 업로드 불필요).
+    # API가 실패하거나 키가 없으면 지금까지처럼 업로드용 엑셀로 대체(fallback)한다.
+    naver_dispatched_ids = set()
+    naver_dispatch_notes = []
+    naver_client_id = os.environ.get("NAVER_CLIENT_ID")
+    naver_client_secret = os.environ.get("NAVER_CLIENT_SECRET")
+    smartstore_results = [(p, r) for p, r in submit_results if p.order.channel == Channel.SMARTSTORE]
+    if naver_client_id and naver_client_secret and smartstore_results:
+        try:
+            client = NaverCommerceClient(naver_client_id, naver_client_secret)
+            tracking_map = {p.order.original_order_id: r["regiNo"] for p, r in smartstore_results}
+            dispatch_result = dispatch_orders(client, tracking_map)
+            naver_dispatched_ids = set(dispatch_result["success_ids"])
+            if naver_dispatched_ids:
+                naver_dispatch_notes.append(f"네이버 발송처리 API로 {len(naver_dispatched_ids)}건 자동 등록 완료")
+            if dispatch_result["fail_infos"]:
+                naver_dispatch_notes.append(f"네이버 발송처리 일부 실패(엑셀로 대체): {dispatch_result['fail_infos']}")
+        except Exception as e:
+            naver_dispatch_notes.append(f"네이버 발송처리 API 호출 실패 (엑셀로 대체): {e}")
+
     attachments = [result_csv]
+    naver_fallback_results = [(p, r) for p, r in smartstore_results if p.order.original_order_id not in naver_dispatched_ids]
     naver_xlsx = os.path.join(output_dir, f"{today}_네이버발송처리.xlsx")
-    if write_naver_dispatch_excel(submit_results, naver_xlsx) > 0:
+    if write_naver_dispatch_excel(naver_fallback_results, naver_xlsx) > 0:
         attachments.append(naver_xlsx)
     uglyus_xlsx = os.path.join(output_dir, f"{today}_어글리어스송장등록.xlsx")
     if write_uglyus_dispatch_excel(submit_results, uglyus_xlsx) > 0:
@@ -105,6 +128,9 @@ def run(today: str = None, send_email: bool = True) -> str:
     if error_count:
         lines.append("")
         lines.append(f"⚠ {error_count}건 접수 실패 — 확인 후 재시도 필요")
+    if naver_dispatch_notes:
+        lines.append("")
+        lines.extend(naver_dispatch_notes)
     if naver_xlsx in attachments:
         lines.append("")
         lines.append("네이버 스마트스토어 발주발송관리 > 엑셀 일괄발송에 첨부된 엑셀 파일을 그대로 업로드하세요.")

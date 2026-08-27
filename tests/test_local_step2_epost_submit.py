@@ -195,6 +195,90 @@ def test_second_run_same_day_accumulates_csv_and_dispatch_file():
         assert [ws.cell(r, 1).value for r in range(2, ws.max_row + 1)] == ["id-1", "id-2"]
 
 
+def test_naver_api_dispatch_success_skips_excel_generation():
+    order = build_standard_order(
+        Channel.SMARTSTORE, "2026082512345", ProductGroup.CHEONGYUJA,
+        "정다은", "01099998888", "전남 고흥군 ...", "59554", 3,
+    )
+
+    with tempfile.TemporaryDirectory() as inbox_root:
+        output_dir = _write_pending(inbox_root, "2026-08-14", [order])
+        _set_epost_env()
+
+        original_today_dir = step2.today_dir
+        original_insert_order = step2.insert_order
+        original_naver_client = step2.NaverCommerceClient
+        original_dispatch = step2.dispatch_orders
+        step2.today_dir = lambda today: step1.today_dir(today, inbox_root)
+        step2.insert_order = lambda auth_key, security_key, params: {"regiNo": "6890166064699"}
+        step2.NaverCommerceClient = lambda client_id, client_secret: object()
+        step2.dispatch_orders = lambda client, mapping: {
+            "success_ids": list(mapping.keys()), "fail_infos": [],
+        }
+
+        old_env = {k: os.environ.get(k) for k in ("NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET")}
+        os.environ["NAVER_CLIENT_ID"] = "id"
+        os.environ["NAVER_CLIENT_SECRET"] = "secret"
+        try:
+            result = step2.run(today="2026-08-14", send_email=False)
+        finally:
+            step2.today_dir = original_today_dir
+            step2.insert_order = original_insert_order
+            step2.NaverCommerceClient = original_naver_client
+            step2.dispatch_orders = original_dispatch
+            for k, v in old_env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+        assert "네이버 발송처리 API로 1건 자동 등록 완료" in result
+        # API로 이미 등록됐으니 업로드용 엑셀을 따로 첨부/안내하지 않아야 함
+        assert "엑셀 일괄발송" not in result
+
+
+def test_naver_api_dispatch_failure_falls_back_to_excel():
+    order = build_standard_order(
+        Channel.SMARTSTORE, "2026082512345", ProductGroup.CHEONGYUJA,
+        "정다은", "01099998888", "전남 고흥군 ...", "59554", 3,
+    )
+
+    with tempfile.TemporaryDirectory() as inbox_root:
+        output_dir = _write_pending(inbox_root, "2026-08-14", [order])
+        _set_epost_env()
+
+        original_today_dir = step2.today_dir
+        original_insert_order = step2.insert_order
+        original_naver_client = step2.NaverCommerceClient
+        original_dispatch = step2.dispatch_orders
+        step2.today_dir = lambda today: step1.today_dir(today, inbox_root)
+        step2.insert_order = lambda auth_key, security_key, params: {"regiNo": "6890166064699"}
+        step2.NaverCommerceClient = lambda client_id, client_secret: object()
+
+        def _fail_dispatch(client, mapping):
+            raise RuntimeError("네이버 서버 오류")
+        step2.dispatch_orders = _fail_dispatch
+
+        old_env = {k: os.environ.get(k) for k in ("NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET")}
+        os.environ["NAVER_CLIENT_ID"] = "id"
+        os.environ["NAVER_CLIENT_SECRET"] = "secret"
+        try:
+            result = step2.run(today="2026-08-14", send_email=False)
+        finally:
+            step2.today_dir = original_today_dir
+            step2.insert_order = original_insert_order
+            step2.NaverCommerceClient = original_naver_client
+            step2.dispatch_orders = original_dispatch
+            for k, v in old_env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+        assert "엑셀로 대체" in result
+        assert os.path.exists(os.path.join(output_dir, "2026-08-14_네이버발송처리.xlsx"))
+
+
 if __name__ == "__main__":
     tests = [obj for name, obj in list(globals().items()) if name.startswith("test_")]
     for t in tests:
