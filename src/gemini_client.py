@@ -11,7 +11,12 @@ import urllib.error
 import urllib.request
 
 GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-DEFAULT_MODEL = "gemini-flash-latest"
+# 별칭(gemini-flash-latest, gemini-pro-latest) 대신 버전을 고정한다 — 별칭은 구글이 새 모델을
+# 내면 예고 없이 바뀌어 파싱 결과가 달라질 수 있고, 반대로 옛 이름(gemini-2.5-pro)은 어느 날
+# 404로 죽는다(2026-09-02 확인). 같은 날 실제 주문 메일로 비교한 결과 Flash/Pro 전 모델이
+# 정확도 동일(31/31)했고 3.7 Flash가 가장 빨랐다(평균 2.4초, Pro는 15초) — 느릴수록
+# 타임아웃 위험만 커지므로 3.7 Flash로 고정한다.
+DEFAULT_MODEL = "gemini-3.7-flash"
 _TIMEOUT_SECONDS = 60
 _MAX_ATTEMPTS = 3
 _RETRY_DELAY_SECONDS = 5
