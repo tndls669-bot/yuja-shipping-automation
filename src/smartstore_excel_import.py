@@ -70,6 +70,7 @@ def orders_from_workbook(wb) -> list[StandardOrder]:
             scheduled_delivery=bool(get("배송희망일")),
             product_detail=product_detail,
             address_detail=address_detail,
+            order_source="네이버스마트스토어",
         ))
 
     return orders

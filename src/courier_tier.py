@@ -37,6 +37,18 @@ def _bucket_by_weight(weight_kg: float) -> str:
     return TIER_10KG
 
 
+def _format_spec_kg(loaded_kg: float) -> str:
+    if loaded_kg < 1:
+        return f"{round(loaded_kg * 1000)}g"
+    text = f"{loaded_kg:g}"
+    return f"{text}kg"
+
+
+def _goods_label(product_name: str, spec: str, order_source: str) -> str:
+    label = f"({product_name},{spec})"
+    return f"{label} {order_source}" if order_source else label
+
+
 @dataclass
 class Package:
     order: StandardOrder
@@ -53,10 +65,9 @@ def orders_to_packages(orders: list) -> list:
             bottle_count = int(order.weight_or_qty or 0)
             weight_kg = round(bottle_count * YUJACHEONG_BOTTLE_WEIGHT_KG, 2)
             tier = _bucket_by_weight(weight_kg) if bottle_count else None
-            label_parts = [order.product_group.value, order.product_detail or "", order.box_composition]
-            packages.append(Package(
-                order, " ".join(p for p in label_parts if p), tier, weight_kg or None, BOTTLE_BOX,
-            ))
+            product_name = " ".join(p for p in (order.product_group.value, order.product_detail) if p)
+            label = _goods_label(product_name, f"{bottle_count}병", order.order_source)
+            packages.append(Package(order, label, tier, weight_kg or None, BOTTLE_BOX))
         elif order.product_group in (ProductGroup.CHEONGYUJA, ProductGroup.YUJA):
             boxes = calc_boxes(order.weight_or_qty or 0)
             if not boxes:
@@ -64,7 +75,7 @@ def orders_to_packages(orders: list) -> list:
                 continue
             for box_type, loaded_kg in boxes:
                 tier = _RAW_BOX_TIER.get(box_type)
-                label = f"{order.product_group.value} {box_type}({loaded_kg}kg적재)"
+                label = _goods_label(order.product_group.value, _format_spec_kg(loaded_kg), order.order_source)
                 packages.append(Package(order, label, tier, loaded_kg, box_type))
         else:
             packages.append(Package(order, order.box_composition, None))

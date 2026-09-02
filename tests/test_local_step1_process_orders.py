@@ -1,4 +1,3 @@
-import json
 import os
 import sys
 import tempfile
@@ -7,6 +6,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import local_step1_process_orders as step1  # noqa: E402
 import text_order_parser  # noqa: E402
+from csv_export import read_orders_csv  # noqa: E402
+from schema import Channel  # noqa: E402
+
+
+def _read_orders_csv(day_dir, today):
+    return read_orders_csv(os.path.join(day_dir, "output", f"{today}_orders.csv"))
 
 
 def _stub_per_call(responses):
@@ -68,12 +73,10 @@ def test_files_dropped_in_subfolder_are_parsed_and_archived():
         assert not os.path.exists(os.path.join(day_dir, "전화문자", "order1.txt"))
         assert os.path.exists(os.path.join(day_dir, "전화문자", "processed", "order1.txt"))
 
-        pending_path = os.path.join(day_dir, "output", "pending_epost_orders.json")
-        with open(pending_path, encoding="utf-8") as f:
-            pending = json.load(f)
-        assert len(pending) == 1
-        assert pending[0]["recipient_name"] == "홍길동"
-        assert pending[0]["channel"] == "전화문자"
+        orders = _read_orders_csv(day_dir, "2026-08-14")
+        assert len(orders) == 1
+        assert orders[0].recipient_name == "홍길동"
+        assert orders[0].channel == Channel.PHONE_TEXT
 
 
 def test_issue_orders_are_excluded_from_pending_list():
@@ -100,8 +103,8 @@ def test_issue_orders_are_excluded_from_pending_list():
 
         _run(inbox_root)
 
-        pending_path = os.path.join(day_dir, "output", "pending_epost_orders.json")
-        assert not os.path.exists(pending_path)
+        orders_csv_path = os.path.join(day_dir, "output", "2026-08-14_orders.csv")
+        assert not os.path.exists(orders_csv_path)
         assert os.path.exists(os.path.join(day_dir, "output", "2026-08-14_issues.csv"))
 
 
@@ -146,11 +149,10 @@ def test_naver_api_orders_are_included_when_credentials_present():
     try:
         with tempfile.TemporaryDirectory() as inbox_root:
             _run(inbox_root)
-            output_dir = os.path.join(step1.today_dir("2026-08-14", inbox_root), "output")
-            with open(os.path.join(output_dir, "pending_epost_orders.json"), encoding="utf-8") as f:
-                pending = json.load(f)
-            assert len(pending) == 1
-            assert pending[0]["recipient_name"] == "문정원"
+            day_dir = step1.today_dir("2026-08-14", inbox_root)
+            orders = _read_orders_csv(day_dir, "2026-08-14")
+            assert len(orders) == 1
+            assert orders[0].recipient_name == "문정원"
     finally:
         step1.NaverCommerceClient = old_client
         step1.fetch_actionable_orders = old_fetch
@@ -197,11 +199,9 @@ def test_naver_api_failure_does_not_lose_other_sources_orders():
 
             _run(inbox_root)
 
-            output_dir = os.path.join(day_dir, "output")
-            with open(os.path.join(output_dir, "pending_epost_orders.json"), encoding="utf-8") as f:
-                pending = json.load(f)
-            assert len(pending) == 1
-            assert pending[0]["recipient_name"] == "홍길동"
+            orders = _read_orders_csv(day_dir, "2026-08-14")
+            assert len(orders) == 1
+            assert orders[0].recipient_name == "홍길동"
     finally:
         step1.NaverCommerceClient = old_client
         step1.fetch_actionable_orders = old_fetch
@@ -216,7 +216,47 @@ def test_empty_folders_produce_no_pending_list():
     with tempfile.TemporaryDirectory() as inbox_root:
         _run(inbox_root)
         day_dir = step1.today_dir("2026-08-14", inbox_root)
-        assert not os.path.exists(os.path.join(day_dir, "output", "pending_epost_orders.json"))
+        assert not os.path.exists(os.path.join(day_dir, "output", "2026-08-14_orders.csv"))
+
+
+def test_wholesale_order_source_tags_specific_vendor_from_sender_label():
+    text_order_parser.call_gemini_json = _stub_per_call([
+        [
+            {
+                "recipient_name": "모리",
+                "phone": "01011112222",
+                "address": "부산 ...",
+                "postal_code": "48095",
+                "product_group": "청유자",
+                "weight_or_qty": 0.5,
+                "delivery_message": None,
+                "scheduled_delivery": False,
+            }
+        ],
+    ])
+
+    old_load, old_fetch = step1.load_sender_list, step1.fetch_wholesale_emails
+    step1.load_sender_list = lambda path: [("dbwjd6590@gmail.com", "팔도맘")] if "wholesale_senders" in path else []
+    step1.fetch_wholesale_emails = lambda *a, **k: [("팔도맘", "[보낸사람: dbwjd6590@gmail.com] 주문...")]
+
+    old_env = {k: os.environ.get(k) for k in ("GMAIL_ADDRESS", "GMAIL_APP_PASSWORD")}
+    os.environ["GMAIL_ADDRESS"] = "tndls669@gmail.com"
+    os.environ["GMAIL_APP_PASSWORD"] = "fake"
+    try:
+        with tempfile.TemporaryDirectory() as inbox_root:
+            _run(inbox_root)
+            day_dir = step1.today_dir("2026-08-14", inbox_root)
+            orders = _read_orders_csv(day_dir, "2026-08-14")
+            assert len(orders) == 1
+            assert orders[0].order_source == "팔도맘"
+    finally:
+        step1.load_sender_list = old_load
+        step1.fetch_wholesale_emails = old_fetch
+        for k, v in old_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
 
 
 if __name__ == "__main__":

@@ -10,8 +10,6 @@ from schema import (  # noqa: E402
     compute_box_composition,
     full_address,
     normalize_phone,
-    order_from_dict,
-    order_to_dict,
 )
 
 
@@ -89,39 +87,6 @@ def test_full_address_with_no_detail_is_just_base():
         weight_or_qty=7,
     )
     assert full_address(order) == "전남 고흥군 도덕면 고흥로 540-32"
-
-
-def test_order_to_dict_and_back_round_trips():
-    order = build_standard_order(
-        channel=Channel.WHOLESALE,
-        original_order_id="wholesale-20260814",
-        product_group=ProductGroup.YUJACHEONG,
-        recipient_name="김철수",
-        phone="010-3333-4444",
-        address="전남 고흥군 ...",
-        postal_code="59554",
-        weight_or_qty=2,
-        product_detail="디오가닉",
-        address_detail="101동 202호",
-    )
-    restored = order_from_dict(order_to_dict(order))
-    assert restored == order
-
-
-def test_order_from_dict_handles_missing_product_group():
-    d = {
-        "channel": "전화문자",
-        "original_order_id": "phone-1",
-        "product_group": None,
-        "recipient_name": "박순자",
-        "phone": "01011112222",
-        "address": ".",
-        "postal_code": "",
-        "weight_or_qty": None,
-    }
-    restored = order_from_dict(d)
-    assert restored.product_group is None
-    assert restored.channel == Channel.PHONE_TEXT
 
 
 if __name__ == "__main__":

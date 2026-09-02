@@ -18,7 +18,7 @@ _COURIER_NAME = "우체국택배"
 
 
 def write_naver_dispatch_excel(submit_results: list, output_path: str) -> int:
-    """submit_results: epost_order_submit.submit_orders()가 반환하는 (package, response) 리스트.
+    """submit_results: local_step2_epost_submit.run()이 접수 성공한 건마다 모아두는 (package, response) 리스트.
 
     스마트스토어 채널 주문만 골라서 파일로 쓴다. output_path가 이미 있으면(하루에
     2단계를 여러 번 실행한 경우) 기존 행을 지우지 않고 이어붙인다. 반환값은 이번 호출로

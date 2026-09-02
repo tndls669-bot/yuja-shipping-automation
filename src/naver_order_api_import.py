@@ -73,9 +73,10 @@ def order_detail_to_standard_order(detail: dict) -> StandardOrder:
         postal_code=shipping.get("zipCode", ""),
         weight_or_qty=weight_or_qty,
         box_composition=box_composition,
-        delivery_message="",
+        delivery_message=product_order.get("shippingMemo") or "",
         product_detail=product_detail,
         address_detail=shipping.get("detailedAddress", ""),
+        order_source="네이버스마트스토어",
     )
 
 

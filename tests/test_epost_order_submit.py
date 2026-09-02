@@ -25,7 +25,7 @@ def test_maps_yujacheong_order_to_params():
     assert params["recAddr1"] == "서울특별시 동작구 동작대로29길 91"
     assert params["recAddr2"] == "203동1305호"
     assert params["recMob"] == "01037040094"
-    assert params["goodsNm"] == "유자청 로우슈거 1구전용박스×2"
+    assert params["goodsNm"] == "(유자청 로우슈거,2병)"
     assert params["weight"] == "2"  # 2병 * 0.7kg = 1.4kg -> 올림 2kg
     assert params["testYn"] == "Y"
 

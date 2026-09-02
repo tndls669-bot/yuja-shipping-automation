@@ -23,15 +23,20 @@ _IMAP_HOST = "imap.gmail.com"
 _AUTOMATION_SUBJECT_PREFIX = "[순수유자 발송자동화]"
 
 
-def load_sender_list(path: str) -> list[str]:
+def load_sender_list(path: str) -> list[tuple[str, str]]:
+    """각 줄 "이메일,주문처이름" → (이메일, 주문처이름) 목록. 주문처이름 생략 시 이메일 그대로."""
     if not os.path.exists(path):
         return []
     senders = []
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
-            if line and not line.startswith("#"):
-                senders.append(line.lower())
+            if not line or line.startswith("#"):
+                continue
+            email_addr, _, label = line.partition(",")
+            email_addr = email_addr.strip().lower()
+            label = label.strip() or email_addr
+            senders.append((email_addr, label))
     return senders
 
 
@@ -94,10 +99,11 @@ def _extract_body_and_excel_text(msg) -> str:
 def fetch_wholesale_emails(
     gmail_address: str,
     app_password: str,
-    sender_list: list[str],
+    sender_list: list[tuple[str, str]],
     processed_ids_path: str,
     since_days: int = 3,
-) -> list[str]:
+) -> list[tuple[str, str]]:
+    """반환값: (주문처이름, 본문+엑셀텍스트) 목록."""
     if not sender_list:
         return []
 
@@ -105,7 +111,7 @@ def fetch_wholesale_emails(
     processed_ids = _load_processed_ids(processed_ids_path)
     since_date = (datetime.now() - timedelta(days=since_days)).strftime("%d-%b-%Y")
 
-    new_texts = []
+    new_entries = []
     newly_processed = set()
 
     imap = imaplib.IMAP4_SSL(_IMAP_HOST)
@@ -113,7 +119,7 @@ def fetch_wholesale_emails(
         imap.login(gmail_address, app_password)
         imap.select("INBOX", readonly=True)
 
-        for sender in sender_list:
+        for sender, label in sender_list:
             status, data = imap.search(None, f'(FROM "{sender}" SINCE "{since_date}")')
             if status != "OK":
                 continue
@@ -133,7 +139,7 @@ def fetch_wholesale_emails(
 
                 text = _extract_body_and_excel_text(msg)
                 if text:
-                    new_texts.append(f"[보낸사람: {sender}] [제목: {subject}]\n{text}")
+                    new_entries.append((label, f"[보낸사람: {sender}] [제목: {subject}]\n{text}"))
                 newly_processed.add(msg_id)
     finally:
         imap.logout()
@@ -141,4 +147,4 @@ def fetch_wholesale_emails(
     if newly_processed:
         _save_processed_ids(processed_ids_path, processed_ids | newly_processed)
 
-    return new_texts
+    return new_entries

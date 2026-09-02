@@ -1,5 +1,4 @@
 import csv
-import json
 import os
 import sys
 import tempfile
@@ -10,7 +9,8 @@ import openpyxl  # noqa: E402
 
 import local_step1_process_orders as step1  # noqa: E402
 import local_step2_epost_submit as step2  # noqa: E402
-from schema import Channel, ProductGroup, build_standard_order, order_to_dict  # noqa: E402
+from csv_export import write_orders_csv  # noqa: E402
+from schema import Channel, ProductGroup, build_standard_order  # noqa: E402
 
 
 def _set_epost_env():
@@ -25,8 +25,7 @@ def _write_pending(inbox_root, today, orders):
     day_dir = step1.today_dir(today, inbox_root)
     output_dir = os.path.join(day_dir, "output")
     os.makedirs(output_dir, exist_ok=True)
-    with open(os.path.join(output_dir, "pending_epost_orders.json"), "w", encoding="utf-8") as f:
-        json.dump([order_to_dict(o) for o in orders], f, ensure_ascii=False)
+    write_orders_csv(orders, os.path.join(output_dir, f"{today}_orders.csv"), append=True)
     return output_dir
 
 
@@ -41,7 +40,7 @@ def test_no_pending_file_reports_nothing_to_submit():
         assert "접수 대기 중인 주문이 없습니다" in result
 
 
-def test_successful_submission_writes_result_csv_and_clears_pending():
+def test_successful_submission_writes_result_csv_and_excludes_from_resubmission():
     order = build_standard_order(
         Channel.PHONE_TEXT, "phone-1", ProductGroup.YUJACHEONG,
         "홍길동", "01012345678", "전남 고흥군 ...", "59554", 2,
@@ -57,12 +56,16 @@ def test_successful_submission_writes_result_csv_and_clears_pending():
         step2.insert_order = lambda auth_key, security_key, params: {"regiNo": "6890161633630"}
         try:
             result = step2.run(today="2026-08-14", send_email=False)
+            # 오늘 주문 CSV는 리포트이자 접수 기록이라 지워지지 않고 그대로 남아있어야 함.
+            assert os.path.exists(os.path.join(output_dir, "2026-08-14_orders.csv"))
+            # 하지만 이미 접수완료로 기록됐으니, 다시 돌려도 재접수 대상에서 빠져야 함.
+            second_result = step2.run(today="2026-08-14", send_email=False)
         finally:
             step2.today_dir = original_today_dir
             step2.insert_order = original_insert_order
 
         assert "6890161633630" in result
-        assert not os.path.exists(os.path.join(output_dir, "pending_epost_orders.json"))
+        assert "접수 대기 중인 주문이 없습니다" in second_result
 
         with open(os.path.join(output_dir, "2026-08-14_epost_result.csv"), encoding="utf-8-sig") as f:
             rows = list(csv.reader(f))

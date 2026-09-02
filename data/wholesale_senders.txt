@@ -1,6 +1,8 @@
 # 위탁판매자 주문 이메일 주소를 한 줄에 하나씩 적어두세요.
+# 형식: 이메일,주문처이름  (주문처이름 생략하면 이메일 주소를 그대로 씀)
 # 여기 적힌 주소에서 온 이메일만 자동으로 읽어서 주문으로 처리합니다.
 # 예시:
-# seller1@example.com
-# seller2@naver.com
-farm@uglyus.co.kr
+# seller1@example.com,어느업체
+farm@uglyus.co.kr,어글리어스
+dbwjd6590@gmail.com,팔도맘
+fromnamhae@naver.com,남해로부터

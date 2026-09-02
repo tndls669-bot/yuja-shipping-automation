@@ -60,11 +60,11 @@ def test_automation_report_email_is_skipped_but_marked_processed():
 
     with tempfile.TemporaryDirectory() as tmp:
         ids_path = os.path.join(tmp, "processed.json")
-        texts = email_fetcher.fetch_wholesale_emails("me@gmail.com", "pw", [sender], ids_path)
+        entries = email_fetcher.fetch_wholesale_emails("me@gmail.com", "pw", [(sender, sender)], ids_path)
 
-        assert len(texts) == 1
-        assert "홍길동" in texts[0]
-        assert "오더 리포트" not in "".join(texts)
+        assert len(entries) == 1
+        assert "홍길동" in entries[0][1]
+        assert "오더 리포트" not in "".join(text for _, text in entries)
 
         with open(ids_path, encoding="utf-8") as f:
             processed = json.load(f)
@@ -79,9 +79,9 @@ def test_second_run_does_not_refetch_already_processed_report():
 
     with tempfile.TemporaryDirectory() as tmp:
         ids_path = os.path.join(tmp, "processed.json")
-        email_fetcher.fetch_wholesale_emails("me@gmail.com", "pw", [sender], ids_path)
-        texts = email_fetcher.fetch_wholesale_emails("me@gmail.com", "pw", [sender], ids_path)
-        assert texts == []
+        email_fetcher.fetch_wholesale_emails("me@gmail.com", "pw", [(sender, sender)], ids_path)
+        entries = email_fetcher.fetch_wholesale_emails("me@gmail.com", "pw", [(sender, sender)], ids_path)
+        assert entries == []
 
 
 if __name__ == "__main__":

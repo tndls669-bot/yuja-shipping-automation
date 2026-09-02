@@ -1,6 +1,8 @@
 import os
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from box_calc import calc_boxes, format_box_composition  # noqa: E402
@@ -56,6 +58,14 @@ def test_format_box_composition_5kg():
 
 def test_format_box_composition_empty():
     assert format_box_composition([]) == ""
+
+
+def test_absurd_weight_raises_instead_of_creating_thousands_of_boxes():
+    # 2026-09-01 사고: CSV 칸이 밀려 우편번호(15621)가 중량으로 들어가면서 이 함수가
+    # 8kg박스 1954개로 조용히 쪼개버렸고, 그게 전부 실제로 우체국에 접수됐다.
+    # 이런 값은 쪼개지 말고 바로 에러로 멈춰야 한다.
+    with pytest.raises(ValueError):
+        calc_boxes(15621)
 
 
 if __name__ == "__main__":

@@ -2,6 +2,10 @@
 __pycache__/
 *.pyc
 
+# 이 PC 전용 파이썬 패키지 묶음(pip --target). 배치파일이 PYTHONPATH로 참조하지만
+# 저장소에 올릴 소스가 아니다 — 새 PC에서는 pip로 다시 설치하면 된다.
+vendor/
+
 # 개인정보(이름/전화번호/주소) 포함 파일 — 절대 커밋하지 않음
 data/inbox/
 data/output/*_orders.csv

@@ -1,25 +1,25 @@
 {
   "season_start_date": "2026-08-15",
-  "total_sales_units": 35,
-  "total_sales_weight_kg": 30.0,
+  "total_sales_units": 84,
+  "total_sales_weight_kg": 76.5,
   "cumulative_by_product": {
-    "청유자": 29,
+    "청유자": 73,
     "유자": 1,
-    "유자청": 5
+    "유자청": 10
   },
   "cumulative_weight_by_product": {
-    "청유자": 29.5,
+    "청유자": 76.0,
     "유자": 0.5
   },
   "cumulative_by_weight_tier": {
-    "1kg": 27,
-    "3kg(4kg박스)": 3,
+    "1kg": 64,
+    "3kg(4kg박스)": 10,
     "8kg": 0
   },
   "cumulative_by_weight_tier_by_product": {
     "청유자": {
-      "1kg": 26,
-      "3kg(4kg박스)": 3,
+      "1kg": 63,
+      "3kg(4kg박스)": 10,
       "8kg": 0
     },
     "유자": {
@@ -29,13 +29,13 @@
     }
   },
   "cumulative_by_platform": {
-    "스마트스토어": 31,
-    "위탁판매자": 3,
+    "스마트스토어": 74,
+    "위탁판매자": 9,
     "전화문자": 1
   },
   "cumulative_by_yujacheong_product": {
     "디오가닉": 1,
-    "로우슈거": 3,
+    "로우슈거": 7,
     "레몬첼로": 0
   }
 }

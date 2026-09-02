@@ -1,12 +1,10 @@
-"""표준 스키마 주문 → 우체국 계약소포 소포신청(InsertOrder) API 파라미터 변환 및 호출.
+"""표준 스키마 패키지 → 우체국 계약소포 소포신청(InsertOrder) API 파라미터 변환.
 
 주문 하나가 여러 패키지(박스)로 쪼개질 수 있으므로 courier_tier.orders_to_packages로
-먼저 분해한 뒤, 패키지 단위로 API를 한 번씩 호출한다.
+먼저 분해한 뒤, 패키지 단위로 이 파라미터를 만들어 API를 한 번씩 호출한다
+(실제 호출 루프는 local_step2_epost_submit.run()에 있다).
 """
 import math
-
-from courier_tier import orders_to_packages
-from epost_api_client import insert_order
 
 _CONTENT_CODE_AGRI = "021"  # 농/수/축산물(일반) — 원물/유자청 전부 이 코드로 충분
 
@@ -48,21 +46,3 @@ def package_to_order_params(
     if test_yn:
         params["testYn"] = "Y"
     return params
-
-
-def submit_orders(
-    orders: list,
-    auth_key: str,
-    security_key: str,
-    cust_no: str,
-    appr_no: str,
-    office_ser: str,
-    order_comp_nm: str,
-    test_yn: bool = False,
-) -> list:
-    results = []
-    for package in orders_to_packages(orders):
-        params = package_to_order_params(package, cust_no, appr_no, office_ser, order_comp_nm, test_yn)
-        response = insert_order(auth_key, security_key, params)
-        results.append((package, response))
-    return results

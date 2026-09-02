@@ -14,9 +14,18 @@ BOX_8KG = "8kg박스"
 _SMALL_BOX_MAX_COMBINED = 5
 
 
+_MAX_REASONABLE_KG = 50  # 이보다 크면 데이터 오류로 보고 즉시 멈춘다(원인: 2026-09-01 사고 참고)
+
+
 def calc_boxes(total_kg: float) -> list[tuple[str, float]]:
     if total_kg <= 0:
         return []
+    if total_kg > _MAX_REASONABLE_KG:
+        # 실제 사고 사례: CSV를 손으로 고치다 우편번호가 중량 칸으로 밀려 들어가
+        # 15,621kg짜리 "주문"이 생겼고, 이 함수가 그걸 8kg박스 1954개로 쪼개서
+        # 전부 우체국에 실제 접수해버렸다. 한 건이 이 정도로 무거울 리 없으니
+        # 조용히 계속 쪼개지 말고 바로 에러로 멈춘다.
+        raise ValueError(f"중량이 비정상적으로 큽니다({total_kg}kg) — 데이터 오류 의심, 접수 전 확인 필요")
 
     boxes: list[tuple[str, float]] = []
     remaining = round(total_kg, 3)

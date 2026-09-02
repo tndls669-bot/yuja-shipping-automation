@@ -3,9 +3,10 @@
 data/inbox/{오늘날짜}/위탁판매, data/inbox/{오늘날짜}/전화문자 폴더에 넣어둔 파일(엑셀/텍스트)과
 등록된 발신자 이메일(위탁판매자, 대표님 본인 문자용 메일)을 모두 읽어 표준 주문으로 파싱한다.
 
-우체국 접수는 하지 않는다(2단계 local_step2_epost_submit.py 담당). 대신 접수 대기 목록을
-data/inbox/{날짜}/output/pending_epost_orders.json에 저장해두고, 오늘 처리된 주문을
-모두 정리한 "오더 리포트" 메일(CSV 첨부)을 보낸다.
+우체국 접수는 하지 않는다(2단계 local_step2_epost_submit.py 담당). 대신 오늘 처리된 주문을
+data/inbox/{날짜}/output/{날짜}_orders.csv에 정리하고 "오더 리포트" 메일(같은 CSV 첨부)을
+보낸다. 이 CSV가 곧 2단계의 접수 대상이므로, 대표님이 엑셀로 열어 주문을 합치거나 주소를
+고치거나 특정 건을 지우면 2단계는 수정된 그대로 접수한다.
 """
 import json
 import os
@@ -14,7 +15,7 @@ from typing import Optional
 
 from aggregate_log import append_packages
 from courier_tier import orders_to_packages
-from csv_export import write_orders_csv
+from csv_export import read_orders_csv, write_orders_csv
 from cumulative_tracker import compute_cumulative, compute_daily_trend, save_cumulative
 from email_fetcher import fetch_wholesale_emails, load_sender_list
 from email_sender import send_summary_email
@@ -23,7 +24,7 @@ from excel_reader import extract_text_from_xlsx
 from generate_dashboard import write_dashboard
 from naver_commerce_api import NaverCommerceClient
 from naver_order_api_import import fetch_actionable_orders
-from schema import Channel, order_to_dict
+from schema import Channel, ProductGroup
 from smartstore_excel_import import load_orders_from_encrypted_xlsx
 from uglyus_order_import import parse_uglyus_table
 from text_order_parser import parse_orders_from_text
@@ -116,19 +117,6 @@ def _fetch_email_texts(senders_path: str, processed_ids_path: str) -> list[str]:
     return fetch_wholesale_emails(gmail_address, app_password, sender_list, processed_ids_path)
 
 
-def _save_pending(output_dir: str, orders: list) -> None:
-    if not orders:
-        return
-    path = os.path.join(output_dir, "pending_epost_orders.json")
-    existing = []
-    if os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as f:
-            existing = json.load(f)
-    existing.extend(order_to_dict(o) for o in orders)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(existing, f, ensure_ascii=False, indent=2)
-
-
 def _update_cumulative_and_dashboard(log_path: str, cumulative_path: str, dashboard_path: str) -> dict:
     if os.path.exists(cumulative_path):
         with open(cumulative_path, "r", encoding="utf-8") as f:
@@ -143,6 +131,60 @@ def _update_cumulative_and_dashboard(log_path: str, cumulative_path: str, dashbo
     return state
 
 
+_PRODUCT_SORT_ORDER = {ProductGroup.CHEONGYUJA: 0, ProductGroup.YUJA: 1, ProductGroup.YUJACHEONG: 2}
+
+
+def _sort_key(order):
+    return (
+        _PRODUCT_SORT_ORDER.get(order.product_group, 99),
+        order.product_detail or "",
+        order.box_composition,
+        order.recipient_name,
+    )
+
+
+def _build_product_totals(ok_orders: list) -> list:
+    """준비(수확/계량)용 — 박스 종류 안 나누고 품목군 하나로만 합친 총량."""
+    from collections import Counter
+
+    order_counts = Counter()
+    totals = Counter()
+    for o in ok_orders:
+        product = o.product_group.value if o.product_group else "?"
+        order_counts[product] += 1
+        if o.weight_or_qty:
+            totals[product] += o.weight_or_qty
+
+    lines = []
+    for product in sorted(order_counts):
+        unit = "병" if product == ProductGroup.YUJACHEONG.value else "kg"
+        total = totals.get(product, 0)
+        total_part = f" / 총 {total:g}{unit}" if total else ""
+        lines.append(f"  - {product}: {order_counts[product]}건{total_part}")
+    return lines
+
+
+def _build_today_breakdown(ok_orders: list) -> list:
+    from collections import Counter
+
+    counts = Counter()
+    weights = Counter()
+    for o in ok_orders:
+        product = o.product_group.value if o.product_group else "?"
+        detail = f" {o.product_detail}" if o.product_detail else ""
+        key = f"{product}{detail} / {o.box_composition or '-'}"
+        counts[key] += 1
+        if o.weight_or_qty and o.product_group in (ProductGroup.CHEONGYUJA, ProductGroup.YUJA):
+            weights[key] += o.weight_or_qty
+
+    lines = []
+    for key in sorted(counts):
+        w = weights.get(key, 0)
+        w_part = f" (합계 {w:g}kg)" if w else ""
+        lines.append(f"  - {key} × {counts[key]}건{w_part}")
+    return lines
+
+
 def _build_report(today: str, ok_orders: list, issue_orders: list, cumulative_state: dict, failed_sources: list = None) -> str:
     failed_sources = failed_sources or []
 
@@ -155,14 +197,26 @@ def _build_report(today: str, ok_orders: list, issue_orders: list, cumulative_st
     lines = [f"[{today}] 오더 리포트 — 정상 {len(ok_orders)}건, 확인필요 {len(issue_orders)}건", ""]
 
     if ok_orders:
-        lines.append(f"■ 정상건 ({len(ok_orders)}건, 우체국 접수 대기 중 — 2단계 접수 확정 필요)")
+        lines.append("■ 오늘 주문 종류별 요약")
+        lines.append("[품목별 합계 — 준비용]")
+        lines.extend(_build_product_totals(ok_orders))
+        lines.append("")
+        lines.append("[박스 종류별 세부내역]")
+        lines.extend(_build_today_breakdown(ok_orders))
+        lines.append("")
+
+    if ok_orders:
+        lines.append(f"■ 정상건 ({len(ok_orders)}건, 우체국 접수 대기 중 — 2단계 접수 확정 필요, 종류별 정렬됨)")
         for o in ok_orders:
             product = o.product_group.value if o.product_group else "?"
             detail = f" {o.product_detail}" if o.product_detail else ""
-            lines.append(
+            line = (
                 f"  - {o.recipient_name} ({o.channel.value}) / {product}{detail} / "
                 f"{o.box_composition} / {o.address} {o.address_detail}".strip()
             )
+            if o.delivery_message:
+                line += f" / ★요청사항: {o.delivery_message}"
+            lines.append(line)
         lines.append("")
 
     if issue_orders:
@@ -221,6 +275,10 @@ def run(
         except Exception as e:
             failed_sources.append(f"{subfolder} 폴더 텍스트 파싱 실패 (파일은 그대로 남겨둠, 다음 실행 때 재시도됨): {e}")
         else:
+            for o in smartstore_orders:
+                o.order_source = "네이버스마트스토어"
+            for o in text_orders:
+                o.order_source = channel.value
             if smartstore_orders:
                 # 스마트스토어 엑셀은 이미 실제 주문번호/컬럼이 정확히 매핑되어 있어 AI 파싱이 불필요.
                 all_orders.extend(smartstore_orders)
@@ -228,25 +286,40 @@ def run(
             if smartstore_orders or text:
                 _archive_folder(folder)
 
+    run_id = datetime.now().strftime("%H%M%S")
+
     def _fetch_and_parse(senders_path_, processed_ids_path_, channel, prefix):
-        texts = _fetch_email_texts(senders_path_, processed_ids_path_)
-        for i, text in enumerate(texts, start=1):
+        entries = _fetch_email_texts(senders_path_, processed_ids_path_)
+        for i, (label, text) in enumerate(entries, start=1):
             # 어글리어스 등 알려진 위탁판매자 주문서 표 형식이면 AI 파싱 없이 정확한
             # 컬럼 매핑으로 바로 처리한다(실제 주문번호를 정확히 잡아야 하기 때문).
             uglyus_orders = parse_uglyus_table(text)
             if uglyus_orders is not None:
+                for o in uglyus_orders:
+                    o.order_source = label
                 all_orders.extend(uglyus_orders)
                 continue
             try:
-                orders = parse_orders_from_text(text, channel, f"{prefix}-{today.replace('-', '')}-mail{i:03d}", api_key=api_key)
+                orders = parse_orders_from_text(
+                    text, channel, f"{prefix}-{today.replace('-', '')}-{run_id}{i:03d}", api_key=api_key
+                )
             except Exception as e:
                 # 메일은 이미 "처리됨"으로 표시돼 다시 못 읽어오므로, 원문을 잃지 않게 파일로 남긴다.
-                recovery_path = os.path.join(output_dir, f"재처리필요_{prefix}_{i:03d}.txt")
-                os.makedirs(output_dir, exist_ok=True)
-                with open(recovery_path, "w", encoding="utf-8") as f:
-                    f.write(text)
-                failed_sources.append(f"메일 {i}번({prefix}) 파싱 실패 — 원문을 {recovery_path}에 저장함: {e}")
+                # 이 저장 자체가 실패해도(디스크 오류 등) failed_sources 기록만은 반드시 남겨서
+                # 주문이 아무 흔적 없이 조용히 사라지는 일이 없게 한다.
+                recovery_path = os.path.join(output_dir, f"재처리필요_{prefix}_{run_id}{i:03d}.txt")
+                try:
+                    os.makedirs(output_dir, exist_ok=True)
+                    with open(recovery_path, "w", encoding="utf-8") as f:
+                        f.write(text)
+                    failed_sources.append(f"메일 {i}번({prefix}, {label}) 파싱 실패 — 원문을 {recovery_path}에 저장함: {e}")
+                except Exception as save_error:
+                    failed_sources.append(
+                        f"메일 {i}번({prefix}, {label}) 파싱 실패, 원문 저장도 실패({save_error}) — 원본 이메일은 이미 처리됨 표시됨: {e}"
+                    )
             else:
+                for o in orders:
+                    o.order_source = label
                 all_orders.extend(orders)
 
     _fetch_and_parse(senders_path, processed_email_ids_path, Channel.WHOLESALE, "wholesale")
@@ -271,26 +344,43 @@ def run(
         else:
             ok_orders.append(order)
 
-    orders_csv_path = os.path.join(output_dir, f"{today}_orders.csv")
-    if all_orders:
-        if ok_orders:
-            write_orders_csv(ok_orders, orders_csv_path, append=True)
-        if issue_orders:
-            write_orders_csv([o for o, _ in issue_orders], os.path.join(output_dir, f"{today}_issues.csv"), append=True)
+    ok_orders.sort(key=_sort_key)
+    issue_orders.sort(key=lambda pair: _sort_key(pair[0]))
 
-    if ok_orders:
-        append_packages(orders_to_packages(ok_orders), today, log_path)
-        _save_pending(output_dir, ok_orders)
+    orders_csv_path = os.path.join(output_dir, f"{today}_orders.csv")
+    issues_csv_path = os.path.join(output_dir, f"{today}_issues.csv")
+
+    # 네이버 API처럼 매 실행마다 "아직 발송 안 된 건"을 통째로 다시 돌려주는 소스가 있어,
+    # 오늘자 CSV에 이미 적힌 주문번호는 다시 쓰지 않는다 — 안 그러면 1단계를 하루에 여러 번
+    # 돌릴 때마다 같은 주문이 중복으로 쌓이고, 대표님이 CSV에서 직접 합치거나 고친 내용도
+    # 다음 실행 때 다시 겹쳐 써질 수 있다.
+    already_ok_ids = {o.original_order_id for o in read_orders_csv(orders_csv_path)} if os.path.exists(orders_csv_path) else set()
+    already_issue_ids = {o.original_order_id for o in read_orders_csv(issues_csv_path)} if os.path.exists(issues_csv_path) else set()
+    new_ok_orders = [o for o in ok_orders if o.original_order_id not in already_ok_ids]
+    new_issue_orders = [(o, iss) for o, iss in issue_orders if o.original_order_id not in already_issue_ids]
+
+    if new_ok_orders:
+        write_orders_csv(new_ok_orders, orders_csv_path, append=True)
+    if new_issue_orders:
+        write_orders_csv([o for o, _ in new_issue_orders], issues_csv_path, append=True)
+
+    if new_ok_orders:
+        append_packages(orders_to_packages(new_ok_orders), today, log_path)
+
+    # 리포트는 이번 실행에서 새로 찾은 것만이 아니라, 오늘 CSV에 쌓인 전체 현황(대표님이
+    # 엑셀로 직접 고친 내용 포함)을 그대로 보여준다.
+    report_ok_orders = read_orders_csv(orders_csv_path) if os.path.exists(orders_csv_path) else []
+    report_ok_orders.sort(key=_sort_key)
 
     cumulative_state = _update_cumulative_and_dashboard(log_path, cumulative_path, dashboard_path)
-    report = _build_report(today, ok_orders, issue_orders, cumulative_state, failed_sources)
+    report = _build_report(today, report_ok_orders, new_issue_orders, cumulative_state, failed_sources)
     print(report)
 
     if send_email:
         gmail_address = os.environ.get("GMAIL_ADDRESS")
         app_password = os.environ.get("GMAIL_APP_PASSWORD")
         if gmail_address and app_password:
-            attachments = [orders_csv_path] if ok_orders and os.path.exists(orders_csv_path) else None
+            attachments = [orders_csv_path] if report_ok_orders and os.path.exists(orders_csv_path) else None
             try:
                 send_summary_email(
                     f"[순수유자 발송자동화] {today} 오더 리포트", report, gmail_address, app_password,
