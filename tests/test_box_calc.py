@@ -60,6 +60,13 @@ def test_format_box_composition_empty():
     assert format_box_composition([]) == ""
 
 
+def test_eight_kg_box_capacity_is_configurable():
+    # 청유자는 밀도가 높아 "8kg박스"에 10kg까지 실제로 들어간다(대표님 확인, 2026-09-03).
+    assert calc_boxes(10, eight_kg_box_capacity=10) == [("8kg박스", 10)]
+    # 기본값(유자 등)은 그대로 8kg이 한계라 10kg이면 여전히 2박스로 나뉜다.
+    assert calc_boxes(10) == [("8kg박스", 8), ("3kg박스", 2)]
+
+
 def test_absurd_weight_raises_instead_of_creating_thousands_of_boxes():
     # 2026-09-01 사고: CSV 칸이 밀려 우편번호(15621)가 중량으로 들어가면서 이 함수가
     # 8kg박스 1954개로 조용히 쪼개버렸고, 그게 전부 실제로 우체국에 접수됐다.

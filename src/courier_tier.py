@@ -12,7 +12,7 @@
 from dataclasses import dataclass
 from typing import Optional
 
-from box_calc import calc_boxes
+from box_calc import CHEONGYUJA_8KG_BOX_CAPACITY, calc_boxes
 from schema import BOTTLE_BOX, ProductGroup, StandardOrder
 
 TIER_2KG = "2kg"
@@ -69,7 +69,8 @@ def orders_to_packages(orders: list) -> list:
             label = _goods_label(product_name, f"{bottle_count}병", order.order_source)
             packages.append(Package(order, label, tier, weight_kg or None, BOTTLE_BOX))
         elif order.product_group in (ProductGroup.CHEONGYUJA, ProductGroup.YUJA):
-            boxes = calc_boxes(order.weight_or_qty or 0)
+            capacity = CHEONGYUJA_8KG_BOX_CAPACITY if order.product_group == ProductGroup.CHEONGYUJA else 8
+            boxes = calc_boxes(order.weight_or_qty or 0, eight_kg_box_capacity=capacity)
             if not boxes:
                 packages.append(Package(order, order.product_group.value, None))
                 continue

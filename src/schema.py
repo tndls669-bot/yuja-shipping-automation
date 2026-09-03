@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
-from box_calc import calc_boxes, format_box_composition
+from box_calc import CHEONGYUJA_8KG_BOX_CAPACITY, calc_boxes, format_box_composition
 
 BOTTLE_BOX = "1구전용박스"
 
@@ -56,7 +56,8 @@ def compute_box_composition(product_group: ProductGroup, weight_or_qty: float) -
     if product_group == ProductGroup.YUJACHEONG:
         bottle_count = int(weight_or_qty)
         return f"{BOTTLE_BOX}×{bottle_count}"
-    boxes = calc_boxes(weight_or_qty)
+    capacity = CHEONGYUJA_8KG_BOX_CAPACITY if product_group == ProductGroup.CHEONGYUJA else 8
+    boxes = calc_boxes(weight_or_qty, eight_kg_box_capacity=capacity)
     return format_box_composition(boxes)
 
 

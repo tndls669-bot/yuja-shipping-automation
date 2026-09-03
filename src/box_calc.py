@@ -16,8 +16,15 @@ _SMALL_BOX_MAX_COMBINED = 5
 
 _MAX_REASONABLE_KG = 50  # 이보다 크면 데이터 오류로 보고 즉시 멈춘다(원인: 2026-09-01 사고 참고)
 
+# 품목별 "8kg박스" 실제 최대 적재량. 밀도가 달라 상자 용적 기준(8kg)을 넘겨 담을 수 있는
+# 품목이 있다 — 청유자(녹색, 밀도 높음)는 10kg까지 확인됨(대표님 확인, 2026-09-03).
+CHEONGYUJA_8KG_BOX_CAPACITY = 10
 
-def calc_boxes(total_kg: float) -> list[tuple[str, float]]:
+
+def calc_boxes(total_kg: float, eight_kg_box_capacity: float = 8) -> list[tuple[str, float]]:
+    """eight_kg_box_capacity: "8kg박스" 하나에 실제로 담을 수 있는 최대 중량. 품목마다
+    밀도가 달라서 상자 용적 기준인 8kg를 넘겨 담을 수 있다 — 청유자(녹색, 밀도 높음)는
+    10kg까지 확인됨(대표님 확인, 2026-09-03). 유자(노란유자)는 기존대로 8kg이 한계."""
     if total_kg <= 0:
         return []
     if total_kg > _MAX_REASONABLE_KG:
@@ -41,12 +48,12 @@ def calc_boxes(total_kg: float) -> list[tuple[str, float]]:
             boxes.append((BOX_3KG, 4))
             boxes.append((BOX_1KG, round(remaining - 4, 3)))
             remaining = 0
-        elif remaining <= 8:
+        elif remaining <= eight_kg_box_capacity:
             boxes.append((BOX_8KG, remaining))
             remaining = 0
         else:
-            boxes.append((BOX_8KG, 8))
-            remaining = round(remaining - 8, 3)
+            boxes.append((BOX_8KG, eight_kg_box_capacity))
+            remaining = round(remaining - eight_kg_box_capacity, 3)
 
     return boxes
 
