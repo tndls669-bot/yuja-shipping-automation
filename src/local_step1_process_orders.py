@@ -293,7 +293,12 @@ def run(
         for i, (label, text) in enumerate(entries, start=1):
             # 어글리어스 등 알려진 위탁판매자 주문서 표 형식이면 AI 파싱 없이 정확한
             # 컬럼 매핑으로 바로 처리한다(실제 주문번호를 정확히 잡아야 하기 때문).
-            uglyus_orders = parse_uglyus_table(text)
+            # 표를 찾았어도 컬럼 값이 예상과 다르면(예: 수량 칸에 텍스트) 여기서 바로
+            # 실패해선 안 된다 — 표를 못 찾은 것과 동일하게 취급해 AI 파싱으로 넘긴다.
+            try:
+                uglyus_orders = parse_uglyus_table(text)
+            except Exception:
+                uglyus_orders = None
             if uglyus_orders is not None:
                 for o in uglyus_orders:
                     o.order_source = label

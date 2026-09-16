@@ -47,6 +47,12 @@ def parse_uglyus_table(text: str) -> list[StandardOrder] | None:
 
     orders = []
     for line in lines[header_idx + 1:]:
+        if line.startswith("[시트:"):
+            # 어글리어스 엑셀에 요약용 두 번째 시트("주문서(고객별)")가 추가되면서
+            # 그 시트의 헤더/데이터 행도 pipe로 구분된 줄이라 첫 번째 시트 표의 연장으로
+            # 잘못 읽혔었다(2026-09-14 장애: 그 시트의 "도서산간지역" 칸이 첫 번째 시트
+            # 기준 "수량" 자리로 밀려 들어가 숫자 변환에서 죽었다). 시트 경계에서 멈춘다.
+            break
         if "|" not in line:
             continue
         cells = _split_row(line)

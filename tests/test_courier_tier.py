@@ -37,7 +37,7 @@ def test_8kg_box_maps_to_10kg_tier():
 
 def test_multi_box_order_splits_into_separate_packages_with_own_tiers():
     order = build_standard_order(
-        Channel.WHOLESALE, "id-1", ProductGroup.CHEONGYUJA, "김철수", "01033334444", "주소", "22222", 12,
+        Channel.WHOLESALE, "id-1", ProductGroup.CHEONGYUJA, "김철수", "01033334444", "주소", "22222", 15,
     )
     packages = orders_to_packages([order])
     assert len(packages) == 2
@@ -67,8 +67,9 @@ def test_yujacheong_bottles_stay_as_one_package_and_use_estimated_weight():
 
 
 def test_cheongyuja_10kg_fits_in_single_8kg_box():
-    # 청유자(녹색)는 밀도가 높아 "8kg박스" 하나에 10kg까지 실제로 들어간다(대표님 확인,
-    # 2026-09-03). 유자(노란유자)는 그대로 8kg이 한계라 같은 무게면 2박스로 나뉜다.
+    # 청유자(녹색)는 밀도가 높아 "8kg박스" 하나에 12kg까지 실제로 들어간다(대표님 확인,
+    # 2026-09-09 — 최초 2026-09-03엔 10kg로 확인됐으나 이후 12kg까지로 정정).
+    # 유자(노란유자)는 그대로 8kg이 한계라 같은 무게면 2박스로 나뉜다.
     order = build_standard_order(
         Channel.PHONE_TEXT, "id-1", ProductGroup.CHEONGYUJA, "이정은", "01011112222", "주소", "11111", 10,
     )
@@ -76,6 +77,22 @@ def test_cheongyuja_10kg_fits_in_single_8kg_box():
     assert len(packages) == 1
     assert packages[0].weight_kg == 10
     assert packages[0].tier == TIER_10KG
+
+
+def test_cheongyuja_12kg_fits_but_13kg_splits():
+    order_12kg = build_standard_order(
+        Channel.PHONE_TEXT, "id-1", ProductGroup.CHEONGYUJA, "콘반 주식회사", "01011112222", "주소", "11111", 12,
+    )
+    packages = orders_to_packages([order_12kg])
+    assert len(packages) == 1
+    assert packages[0].weight_kg == 12
+
+    order_13kg = build_standard_order(
+        Channel.PHONE_TEXT, "id-2", ProductGroup.CHEONGYUJA, "콘반 주식회사", "01011112222", "주소", "11111", 13,
+    )
+    packages = orders_to_packages([order_13kg])
+    assert len(packages) == 2
+    assert {p.weight_kg for p in packages} == {12, 1}
 
 
 def test_yuja_10kg_still_splits_into_two_boxes():

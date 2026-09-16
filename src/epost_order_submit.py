@@ -31,7 +31,7 @@ def package_to_order_params(
         "microYn": "N",
         "packngMtrCd": "01",
         "orderNo": order.original_order_id,
-        "ordCompNm": order_comp_nm,
+        "ordCompNm": order.sender_name or order_comp_nm,
         "recNm": order.recipient_name,
         "recZip": order.postal_code,
         "recAddr1": order.address,

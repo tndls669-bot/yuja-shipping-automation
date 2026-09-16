@@ -42,6 +42,8 @@ class StandardOrder:
     product_detail: Optional[str] = None  # 유자청일 때만 의미 있음 (디오가닉/로우슈거/레몬첼로)
     address_detail: str = ""  # 상세주소 (동/호수, 층수 등) — 우체국 양식이 기본/상세를 별도 칸으로 요구함
     order_source: str = ""  # 실제 주문처 — 팔도맘/남해로부터/어글리어스/네이버스마트스토어/전화문자 등
+    sender_name: Optional[str] = None  # 지정 시 이 건만 발송인 이름(EPOST_ORDER_COMP_NM 대신)으로 접수.
+    # 선물 주문 등 극히 드문 개별 요청용 — 표준 CSV 컬럼이 아니라 코드로 직접 주문을 만들 때만 쓴다.
 
 
 def full_address(order: StandardOrder) -> str:

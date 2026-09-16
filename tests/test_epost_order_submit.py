@@ -53,6 +53,29 @@ def test_delivery_message_included_only_when_present():
     assert params["delivMsg"] == "문 앞에 놓아주세요"
 
 
+def test_per_order_sender_name_overrides_default():
+    # 선물 주문 등 극히 드문 경우, 주문 하나만 발송인 이름을 대표님 계정 기본값
+    # 대신 다르게 접수해야 할 때가 있다(예: 2026-09-15 권민철님 선물세트 건).
+    order = build_standard_order(
+        Channel.SMARTSTORE, "id-4", ProductGroup.CHEONGYUJA,
+        "권윤지", "01063525010", "주소", "44444", 1,
+    )
+    order.sender_name = "권민철"
+    package = orders_to_packages([order])[0]
+    params = package_to_order_params(package, "custno", "apprno", "01", "순수유자")
+    assert params["ordCompNm"] == "권민철"
+
+
+def test_sender_name_defaults_to_account_default_when_unset():
+    order = build_standard_order(
+        Channel.SMARTSTORE, "id-5", ProductGroup.CHEONGYUJA,
+        "홍길동", "01011112222", "주소", "55555", 1,
+    )
+    package = orders_to_packages([order])[0]
+    params = package_to_order_params(package, "custno", "apprno", "01", "순수유자")
+    assert params["ordCompNm"] == "순수유자"
+
+
 if __name__ == "__main__":
     tests = [obj for name, obj in list(globals().items()) if name.startswith("test_")]
     for t in tests:

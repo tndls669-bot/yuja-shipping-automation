@@ -60,14 +60,14 @@ def test_compute_cumulative_reads_multiple_days_and_sums_them():
 
 def test_multi_box_order_counts_as_multiple_units():
     big_order = build_standard_order(
-        Channel.WHOLESALE, "id-big", ProductGroup.CHEONGYUJA, "박민수", "01077778888", "주소", "44444", 12,
+        Channel.WHOLESALE, "id-big", ProductGroup.CHEONGYUJA, "박민수", "01077778888", "주소", "44444", 15,
     )
     with tempfile.TemporaryDirectory() as tmp_dir:
         log_path = os.path.join(tmp_dir, "aggregate_log.csv")
         append_packages(orders_to_packages([big_order]), "2026-08-09", log_path)
         state = compute_cumulative(season_start_date="2026-08-15", log_path=log_path)
 
-    assert state["total_sales_units"] == 2  # 12kg -> 8kg박스 + 3kg박스, 박스(패키지) 단위로 집계
+    assert state["total_sales_units"] == 2  # 15kg -> 8kg박스(12kg적재) + 3kg박스, 박스(패키지) 단위로 집계
     assert state["cumulative_by_weight_tier"] == {"1kg": 0, "3kg(4kg박스)": 1, "8kg": 1}
 
 

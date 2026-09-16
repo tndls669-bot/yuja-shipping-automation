@@ -259,6 +259,54 @@ def test_wholesale_order_source_tags_specific_vendor_from_sender_label():
                 os.environ[k] = v
 
 
+def test_malformed_uglyus_table_falls_back_to_ai_parsing_instead_of_crashing():
+    # 2026-09-14 실제 장애: 어글리어스 표의 "수량" 칸에 숫자 대신 "도서산간지역" 같은
+    # 텍스트가 들어있으면 parse_uglyus_table이 예외를 던졌고, 그게 그대로 전체 1단계를
+    # 죽여서 그날 위탁판매/전화문자/네이버 주문이 전부 처리되지 못했다. 표 파싱이
+    # 실패하면 "표를 못 찾음"과 똑같이 취급해 AI 파싱으로 넘어가야 한다.
+    text_order_parser.call_gemini_json = _stub_per_call([
+        [
+            {
+                "recipient_name": "모리",
+                "phone": "01011112222",
+                "address": "부산 ...",
+                "postal_code": "48095",
+                "product_group": "청유자",
+                "weight_or_qty": 0.5,
+                "delivery_message": None,
+                "scheduled_delivery": False,
+            }
+        ],
+    ])
+
+    old_load, old_fetch = step1.load_sender_list, step1.fetch_wholesale_emails
+    step1.load_sender_list = lambda path: [("farm@uglyus.co.kr", "어글리어스")] if "wholesale_senders" in path else []
+    malformed_table = (
+        "상품주문번호 | 수취인명 | 옵션정보 | 상품명 | 수량\n"
+        "12345 | 모리 | 옵션 | 청유자 | 도서산간지역"
+    )
+    step1.fetch_wholesale_emails = lambda *a, **k: [("어글리어스", malformed_table)]
+
+    old_env = {k: os.environ.get(k) for k in ("GMAIL_ADDRESS", "GMAIL_APP_PASSWORD")}
+    os.environ["GMAIL_ADDRESS"] = "tndls669@gmail.com"
+    os.environ["GMAIL_APP_PASSWORD"] = "fake"
+    try:
+        with tempfile.TemporaryDirectory() as inbox_root:
+            _run(inbox_root)  # 예외 없이 끝나야 한다
+            day_dir = step1.today_dir("2026-08-14", inbox_root)
+            orders = _read_orders_csv(day_dir, "2026-08-14")
+            assert len(orders) == 1
+            assert orders[0].recipient_name == "모리"
+    finally:
+        step1.load_sender_list = old_load
+        step1.fetch_wholesale_emails = old_fetch
+        for k, v in old_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
 if __name__ == "__main__":
     tests = [obj for name, obj in list(globals().items()) if name.startswith("test_")]
     for t in tests:

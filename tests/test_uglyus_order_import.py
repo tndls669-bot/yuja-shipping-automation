@@ -59,6 +59,29 @@ def test_rows_without_order_id_are_skipped():
     assert orders == []
 
 
+_TWO_SHEET_EMAIL_TEXT = """[보낸사람: farm@uglyus.co.kr] [제목: [어글리어스] 주문서]
+[첨부파일: 주문서.xlsx]
+[시트: 주문서(상품별)]
+상태 | 상품명 | 상품주문번호 | 배송방법 | 택배사 | 송장번호 | 구매자명 | 구매자연락처 | 수취인명 | 수취인연락처1 | 수취인연락처2 | 옵션정보 | 수량 | 우편번호 | 배송지 | 배송메세지 | 기본주소 | 상세주소 | 선물번호 | 도서산간지역 | 품절유무
+신규 주문 | 유기농 청유자 1kg | 695344 | 택배,등기,소포 |  |  | . | 01086059504 | 김승아 | 01086059504 |  | 유기농 청유자 1kg | 1 | 61699 | 전남광주통합특별시 남구 서문대로 760 101동 302호 |  | 전남광주통합특별시 남구 서문대로 760 | 101동 302호 |  | N | N
+[시트: 주문서(고객별)]
+묶음번호 | 묶음건수 | 합포장 | 수취인명 | 수취인연락처1 | 우편번호 | 배송지 | 상품명 | 옵션정보 | 수량 | 상품주문번호 | 배송메세지 | 도서산간지역
+1 | 1 | N | 김승아 | 01086059504 | 61699 | 전남광주통합특별시 남구 서문대로 760 101동 302호 | 유기농 청유자 1kg | 유기농 청유자 1kg | 1 | 695344 |  | N
+"""
+
+
+def test_second_summary_sheet_does_not_leak_into_first_sheet_rows():
+    # 2026-09-14 실제 장애: 어글리어스가 두 번째 요약 시트("주문서(고객별)")를 추가한 뒤,
+    # 그 시트의 헤더/데이터 행까지 첫 번째 시트 표의 연장으로 읽혀서 "도서산간지역" 값이
+    # 첫 번째 시트 기준 "수량" 자리로 밀려 들어가 float 변환에서 예외가 났다.
+    orders = parse_uglyus_table(_TWO_SHEET_EMAIL_TEXT)
+    assert orders is not None
+    assert len(orders) == 1
+    assert orders[0].original_order_id == "695344"
+    assert orders[0].recipient_name == "김승아"
+    assert orders[0].weight_or_qty == 1.0
+
+
 if __name__ == "__main__":
     tests = [obj for name, obj in list(globals().items()) if name.startswith("test_")]
     for t in tests:
